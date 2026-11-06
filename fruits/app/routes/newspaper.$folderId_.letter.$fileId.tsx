@@ -8,8 +8,9 @@
 // outside the project page's own route, so none of that page loads here.
 //
 // Who it opens for is one function's to say (`letterWritingFor`,
-// `letterDesk.server.ts`): someone who manages letters on this project
-// and whose save the save route would take. Anyone else gets the 404 of
+// `letterDesk.server.ts`): someone who may write this letter here
+// (`mayWriteLetter`: a Guide on the project, or a client for their own).
+// Anyone else gets the 404 of
 // a letter that isn't there, and nothing of a draft leaves the server
 // for them. Everyone the page opens for can write, so there is no
 // read-only version of it.

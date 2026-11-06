@@ -20,7 +20,7 @@ import {
   type UploadedPicture,
 } from "robustness-core/data/letters.server";
 import { merge } from "robustness-core/data/generic.server";
-import { houseAtStart, mayStartLetter } from "robustness-core/data/letterHouses";
+import { houseAtStart, mayStartLetter, projectHasClients } from "robustness-core/data/letterHouses";
 import { houseMembers } from "robustness-core/data/letterHouses.server";
 import type { FileRef } from "robustness-core/data/vault.types";
 
@@ -65,7 +65,7 @@ const MAX_INLINE_MARKDOWN_BYTES = 5 * 1024 * 1024;
  * purpose line and gets no brief ("A client is not offered the purpose
  * line... and does not get the brief"). A kept talk-through (`from`)
  * starts theirs as it starts a guide's.
- * A Guide on the project or staff (`canManageLetters`). Replacing an
+ * Bringing one in is a manager's (`canManageLetters`). Replacing an
  * existing one is `/api/vault/replace/:fileId`, which keeps the id and so
  * the link. Nothing is shared by this route: the link is a separate
  * switch.
@@ -84,10 +84,12 @@ export async function action({ request, params }: ActionFunctionArgs) {
   const role = await getProjectRole(project, user._id);
   const viewer = letterViewerOf(user._id, role);
   const manages = canManageLetters(user, role);
-  // A client is in the clients' house with no `guiding`; a Guide on the
-  // project, or staff, manages. Neither: nothing to start here.
-  const asClient = !manages && viewer.house === "clients";
-  if (!manages && !mayStartLetter(viewer)) {
+  // Starting a letter is a Guide's or a client's (`mayStartLetter`), the
+  // same rule as the desk that opens it next; staff off the project,
+  // who manage but do not write, start none (they could not open it).
+  // Bringing a letter in from outside stays the manager's.
+  const asClient = viewer.house === "clients";
+  if (!mayStartLetter(viewer)) {
     return Response.json({ error: LETTER_START_REFUSED }, { status: 403 });
   }
 
@@ -125,7 +127,7 @@ export async function action({ request, params }: ActionFunctionArgs) {
     // form has nothing to pick.
     const address = asClient
       ? ({ ok: true, toHouse: "guides" } as const)
-      : houseAtStart({ projectHasClients: (await houseMembers(project)).some((m) => m.house === "clients"), asked: form.get("to") });
+      : houseAtStart({ projectHasClients: projectHasClients(await houseMembers(project)), asked: form.get("to") });
     if (!address.ok) return Response.json({ error: address.error }, { status: address.status });
     // Started from what this guide said about a letter they read (`from`,
     // that letter's id; Austin, 2026-11-06: "spending the time to sit

@@ -305,7 +305,7 @@ describe("the tab", () => {
   const readerRows = rows.map((r) => ({ ...r, writes: false, editedSinceSent: false }));
 
   it("a reader sees the list and no controls; a sent page is the client's link, an unsent one is not a link", () => {
-    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={readerRows} manage={false} onChanged={() => {}} />);
+    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={readerRows} manage={false} writes={false} onChanged={() => {}} />);
     expect(html).toContain(`href="/public/letter/${FILE}"`);
     expect(html).not.toContain('href="/public/letter/draft1"');
     expect(html).not.toContain("/vault?file=");
@@ -317,7 +317,7 @@ describe("the tab", () => {
   });
 
   it("a manager reads what became of a shared file's PDF, in the worker's own words", () => {
-    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={rows} manage={true} onChanged={() => {}} />);
+    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={rows} manage={true} writes onChanged={() => {}} />);
     expect(html).toContain("PDF couldn&#x27;t be made: the public page answered 500");
     expect(html).toContain('data-pdf-state="failed"');
     expect(pdfLine({ state: "ready" })).toBe("PDF ready");
@@ -326,7 +326,7 @@ describe("the tab", () => {
   });
 
   it("a manager gets New letter and Upload, and per page the switch, Replace and Edit", () => {
-    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={rows} manage={true} onChanged={() => {}} />);
+    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={rows} manage={true} writes onChanged={() => {}} />);
     expect(html).toContain("New letter");
     expect(html).toContain("Upload a letter");
     expect(html).toContain('accept=".md,text/markdown,image/*"');
@@ -341,13 +341,13 @@ describe("the tab", () => {
   });
 
   it("the title opens what the client sees: the public page, always for a manager, once shared for a reader", () => {
-    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={rows} manage={true} onChanged={() => {}} />);
+    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={rows} manage={true} writes onChanged={() => {}} />);
     // The title is the base-size link; "Edit" is the xs one. A manager's
     // title always opens the client's page, shared or not.
     expect(html).toContain(`<a href="/public/letter/${FILE}" class="typography_textSize_base`);
     expect(html).toContain(`<a href="/public/letter/draft1" class="typography_textSize_base`);
     expect(html).not.toContain(`<a href="/vault?file=${FILE}" class="typography_textSize_base`);
-    const reader = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={readerRows} manage={false} onChanged={() => {}} />);
+    const reader = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={readerRows} manage={false} writes={false} onChanged={() => {}} />);
     expect(reader).toContain(`<a href="/public/letter/${FILE}"`);
     expect(reader).not.toContain("/vault?file=draft1");
     expect(reader).not.toContain(">Edit<");
@@ -359,7 +359,7 @@ describe("the purpose line (2026-10-28)", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
 
   it("shows under the row that has one, to anyone in the guides' house with the tab (a client's rows carry none: deskRows), and nothing under one that doesn't", () => {
-    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={rows.map((r) => ({ ...r, writes: false }))} manage={false} onChanged={() => {}} />);
+    const html = renderToStaticMarkup(<LettersView projectFolderId="proj1" rows={rows.map((r) => ({ ...r, writes: false }))} manage={false} writes={false} onChanged={() => {}} />);
     expect((html.match(/data-letter-purpose/g) ?? []).length).toBe(1);
     expect(html).toContain("Tell Susan what the attic floor should be.");
   });
@@ -576,9 +576,9 @@ describe("the brief on the letter's page (2026-10-28)", () => {
     expect(html).toContain("Say what it is for first");
   });
 
-  it("the page hands the brief to a guide only, and the public page and the tab carry none of it", () => {
+  it("the page hands the workings to the letter's writer only, and the public page and the tab carry none of it", () => {
     const vault = readFileSync(path.join(here, "../routes/vault.tsx"), "utf8");
-    expect(vault).toMatch(/if \(canManageLetters\(user, roleForLetter\)\) \{\s*letterBrief = /);
+    expect(vault).toMatch(/resolveLetterForWriter\(file\._id, user\)\);\s*if \(writes\) \{\s*letterBrief = /);
     // Drawn by the writing component, only when the loader handed one over.
     expect(vault).toContain("brief={letterBrief}");
     expect(readFileSync(path.join(here, "../components/LetterWriting.tsx"), "utf8")).toContain("{brief && <LetterBrief ");

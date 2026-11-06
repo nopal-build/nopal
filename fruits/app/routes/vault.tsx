@@ -66,7 +66,7 @@ import {
   listFolderChildren,
 } from "robustness-core/data/vault.server";
 import { getProjectRoleForFolderId, isClientEverywhere, listProjectsFor, writesInFolder } from "robustness-core/data/projectSharing.server";
-import { canManageLetters } from "robustness-core/data/letters.server";
+import { resolveLetterForWriter } from "robustness-core/data/letters.server";
 import { letterSendStateFor } from "robustness-core/data/letterSend.server";
 import type { LetterSendState } from "../components/LetterSendControl";
 import { getLetterBriefForPage, type LetterBriefForPage } from "robustness-core/data/brief.server";
@@ -95,7 +95,6 @@ import {
 // Pure, server-free helpers (no `.server` suffix) — safe to import into
 // client-rendered code, unlike everything from `website.server`/
 // `vault.server` above (loader-only, stripped from the client bundle).
-import { withReadmeBody } from "robustness-core/data/project.types";
 import { Badge } from "stamps/Badge";
 import { Select } from "stamps/Select";
 import { WebsitePageContent } from "stamps/WebsitePageContent";
@@ -301,11 +300,11 @@ export async function loader({ request }: LoaderFunctionArgs) {
   let viewerIsOrgGuideOnOrgFolder = false;
   // Runs its people (`people`, a Guide): the "People…" item goes to the Maker.
   let viewerGuidesProject = false;
-  // A letter's page, for a guide (`canManageLetters`, staff or guiding;
-  // asked for every viewer, the owner too, since `viewerGuidesProject`
-  // above is only computed when the viewer isn't the file's owner and
-  // a letter is owned by the project's creator): the brief, and the
-  // controls around it. Null on any other file, and for anyone else.
+  // A letter's page in the back room, for whoever may write the letter
+  // (`resolveLetterForWriter`: a Guide on the project for the guides'
+  // letters; a client's draft is the client's alone, and a client never
+  // reaches the Vault): the workings and the controls around them. Null
+  // on any other file, and for anyone else.
   let letterBrief: LetterBriefForPage | null = null;
   // The send's three states, read here (`sentCopyOf` is server-only) and
   // handed to the toolbar; a send revalidates to read them back.
@@ -373,10 +372,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       }
     }
     if (fileFolderId && isLettersFolderType(ancestry[ancestry.length - 1]?.folder_type) && isMarkdownFile(file)) {
-      const roleForLetter = await timeRequestPerf("fn", "getProjectRoleForFolderId", { folderId: fileFolderId }, () =>
-        getProjectRoleForFolderId(fileFolderId, user._id),
-      );
-      if (canManageLetters(user, roleForLetter)) {
+      const writes = await timeRequestPerf("fn", "resolveLetterForWriter", { fileId: file._id }, () => resolveLetterForWriter(file._id, user));
+      if (writes) {
         letterBrief = await timeRequestPerf("fn", "getLetterBriefForPage", { fileId: file._id }, () => getLetterBriefForPage(file._id));
         // With where it goes: decided already, or the guide's to say (`houseAtSend`).
         letterSend = await letterSendStateFor(file);
@@ -3902,6 +3899,7 @@ export default function VaultV2Page() {
                 projectFolderId={current.ancestry.find((f) => isProjectAnchor(f))?._id ?? null}
                 brief={letterBrief}
                 send={letterSend}
+                writer="guide"
                 editable={canWriteCurrentFile}
                 headerLeft={breadcrumbNode}
                 toolbarExtra={<MoreMenu label="Actions" items={splitEditorActions} trigger={actionsTrigger} />}

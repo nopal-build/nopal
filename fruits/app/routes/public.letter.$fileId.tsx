@@ -76,7 +76,9 @@ const NO_READING: LetterReading = { from: null, toHouse: null, reflection: null,
  * `asThemself` is the signed-in reader with nobody looking as them: the
  * only reader handed their talk-through of it. */
 async function opened(found: { file: FileRef; project: VaultFolder }, page: LetterPage, viewer: Human | null, person: boolean, asThemself: boolean) {
-  return { ...page, ...(await readLetter(found.file, found.project, viewer, { lowers: person, reflects: asThemself })) };
+  // `writeAt` is the writer's own way back to the desk on a preview, and
+  // null on every opened letter, so the page has one shape.
+  return { ...page, ...(await readLetter(found.file, found.project, viewer, { lowers: person, reflects: asThemself })), writeAt: null as string | null };
 }
 
 export async function loader({ request, params }: LoaderFunctionArgs) {
@@ -112,7 +114,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   if (!mine) throw new Response("Not Found", { status: 404 });
   // The way back to where it is being written, for whoever is looking at
   // their own draft: the desk in its project.
-  return { ...(await resolveLetterPage(mine.file, origin, true)), ...NO_READING, writeAt: letterDeskPath(mine.project._id, mine.file._id) };
+  return { ...(await resolveLetterPage(mine.file, origin, true)), ...NO_READING, writeAt: letterDeskPath(mine.project._id, mine.file._id) as string | null };
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -130,9 +132,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function PublicLetterPage() {
-  const { title, showTitle, updated, resent, body, downloadUrl, pdfUrl, preview, loadCellGraphs, videoViewUrlBase, from, toHouse, reflection, writeBackIn, ...rest } = useLoaderData<typeof loader>();
-  // Only a guide's preview of their own draft carries the way back to the desk.
-  const writeAt = "writeAt" in rest ? rest.writeAt : null;
+  const { title, showTitle, updated, resent, body, downloadUrl, pdfUrl, preview, loadCellGraphs, videoViewUrlBase, from, toHouse, reflection, writeBackIn, writeAt } = useLoaderData<typeof loader>();
   const { fileId } = useParams();
   // The reader's own talk-through: one line until they open it, open
   // already when they left words half said. Open, it sits beside the

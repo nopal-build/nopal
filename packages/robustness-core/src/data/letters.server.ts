@@ -1,6 +1,6 @@
 /**
  * Letters (Austin, 2026-10-06 and 2026-10-21; the word, 2026-10-27):
- * a letter is a human message from a guide to the client, each one
+ * a letter is a human message from one house to the other, each one
  * markdown file in the project's `Letters` folder, listed on the
  * project's Letters tab and shared by its own public link. Called
  * "deliverables" until 2026-10-27; the rename changed the word in the
@@ -26,8 +26,10 @@
  *   folder-browsing routes too). The link is the file's own id, so off
  *   then on gives the same URL: the ids are 20 random characters
  *   (`newRecordId`), already unguessable; no token table.
- * - Who switches, uploads and replaces: a Guide on the project, or staff
- *   (`canManageLetters`). A Client reads.
+ * - Who switches the link, uploads and replaces: a Guide on the project,
+ *   or staff (`canManageLetters`). Who writes, talks, sends and deletes:
+ *   `mayWriteLetter` (`letterHouses.ts`), a client for their own letter
+ *   included.
  * - The public page is live: every request re-reads the file, so a
  *   replace shows at once under the same link. Off, or a trashed
  *   project, is a 404.
@@ -46,8 +48,8 @@
  * stays free of the queue so the two don't import each other.
  *
  * Two doors in, one file (Austin, 2026-10-21: a letter is a website
- * page that lives in a project). Written here: the Vault's split editor
- * (`vault.tsx`, `LetterSplitEditor`), where a dropped or pasted
+ * page that lives in a project). Written at the desk in its project
+ * (`letterDesk.server.ts`, `LetterWriting`), where a dropped or pasted
  * picture uploads beside the file and lands in the text as a standard
  * markdown image. Brought from outside: the markdown and its pictures in
  * one upload; `rewriteLocalImagePaths` points every local image path at
@@ -486,18 +488,21 @@ export async function letterPageFile(fileId: string, id: string, viewerHumanId?:
  * letter's own page and the editor's preview draw the draft through the
  * letter's routes, since the Vault's file routes refuse a client
  * (ADR-023). The person may write the letter (`resolveLetterForWriter`),
- * and the file is in the letter's own folder (a dropped picture, the
- * recording: served whether or not the draft names it yet, since a
- * picture is drawn before the autosave lands) or one they may read
- * anyway (`canReadFile`: a project photo through the Photos rows, their
- * own day's original). Nothing else, so a foreign id typed into a draft
- * opens nothing. Asked after `letterPageFile` says no. */
+ * and the file is one they put beside it themselves (in the letter's
+ * folder, stored under their own key: every upload's key starts with
+ * the uploader's id, and the worker's transcode keeps it), or one they
+ * may read anyway (`canReadFile`: a project photo through the Photos
+ * rows, their own day's original). Served whether or not the draft
+ * names it yet, since a dropped picture is drawn before the autosave
+ * lands. Not the folder's other files: a picture beside a letter the
+ * guides sent the guides is not this writer's to see. Asked after
+ * `letterPageFile` says no. */
 export async function letterDraftFile(fileId: string, id: string, actor: Pick<Human, "_id" | "role">): Promise<FileRef | null> {
   const mine = await resolveLetterForWriter(fileId, actor);
   if (!mine) return null;
   const ref = await getFileRefById(id);
   if (!ref || ref.archived_at) return null;
-  if (ref.folder_id && ref.folder_id === mine.file.folder_id) return ref;
+  if (ref.folder_id === mine.file.folder_id && ref.s3_key?.startsWith(`vault/${actor._id}/`)) return ref;
   return (await canReadFile(actor._id, ref)) ? ref : null;
 }
 
@@ -630,22 +635,6 @@ export async function resolveLetterPage(
   return letterPage(file, origin, preview, loadCellGraphs);
 }
 
-/** A letter a Guide may preview before its link is on (Austin,
- * 2026-10-21: the title on the tab always opens what the client would
- * see). Null for anyone who doesn't manage the project's letters,
- * for a non-letter, or for a trashed project. */
-export async function resolveLetterForManager(
-  fileId: string,
-  actor: Pick<Human, "_id" | "role">,
-): Promise<{ file: FileRef; project: VaultFolder } | null> {
-  const file = await getFileRefById(fileId);
-  if (!file || file.archived_at || !isMarkdownFileName(file.name)) return null;
-  const home = await letterHome(file);
-  if (!home || getProjectStatus(home.project) === "trashed") return null;
-  if (!canManageLetters(actor, await getProjectRole(home.project, actor._id))) return null;
-  return { file, project: home.project };
-}
-
 /** Who is writing, as the write rule sees them (`mayWriteLetter`): a
  * client's letter is a client's, anyone else's a guide's. */
 export type LetterWriterKind = "guide" | "client";
@@ -659,7 +648,9 @@ export function letterViewerOf(humanId: string, role: Pick<ResolvedProjectRole, 
  * a Guide on the project for any letter but a client's, a client for a
  * letter from them. Null for anyone else, for a non-letter, an archived
  * one, or a trashed project. Every write route and the writing page ask
- * this; the brief alone stays the manager's (`resolveLetterForManager`). */
+ * this; the brief alone stays the manager's (`letterForManager`, in the
+ * app). Before the send the title on the tab opens the writer's preview
+ * (Austin, 2026-10-21: it always opens what the reader would see). */
 export async function resolveLetterForWriter(
   fileId: string,
   actor: Pick<Human, "_id" | "role">,

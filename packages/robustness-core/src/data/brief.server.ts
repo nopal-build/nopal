@@ -28,8 +28,10 @@
  * record to every reader in the sharing cache, and a write there remounts
  * the editor) and not as a file in the Letters folder (the cache reads
  * the folder): its own row in `letter_briefs`, one per letter, replaced
- * on each run, read by one route that asks `canManageLetters` first. A
- * client, a Crafter or an Observer never reaches it.
+ * on each run, read by one route that asks who may write the letter
+ * first (a guide, or a client for their own, whose row holds a talk and
+ * an outline and never a brief). A Crafter or an Observer never reaches
+ * it.
  */
 
 import { RecordId } from "surrealdb";

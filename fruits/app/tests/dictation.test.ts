@@ -16,7 +16,7 @@ import { signTicket, verifyTicket } from "../../dictation/ticket.js";
 import { attachDictationRelay, DICTATION_PATH } from "../../dictation/relay.js";
 import { buildDictationContext } from "../modules/dictationTerms";
 import { insertFinal, showProvisional, PROVISIONAL_TAG } from "../oxmarkdown/DictateButtonPlugin";
-import { insertText, shownText } from "../components/DictateButton";
+import { insertText, shownText, withoutGuess } from "../components/DictateButton";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
@@ -421,7 +421,10 @@ describe("unsettled words in a text box", () => {
     const box = source.slice(source.indexOf("export function DictatedTextBox"), source.indexOf("export function shownText"));
     expect(box).toContain("value={shownText(value, posRef.current, provisional)}");
     expect(box).toContain("onProvisional={setProvisional}");
-    expect(box).not.toMatch(/onChange\([^)]*provisional/);
+    // Typing over the guess takes the guess back out before the caller sees it.
+    expect(box).toContain("onChange(provisional ? withoutGuess(e.target.value, provisional) : e.target.value)");
+    expect(withoutGuess("Brief reads fine. the vapor Then more.", " the vapor")).toBe("Brief reads fine. Then more.");
+    expect(withoutGuess("Brief reads fine. Then more.", " the vapor")).toBe("Brief reads fine. Then more.");
   });
 
   it("the button draws nothing but its label and the note when dictation stops", () => {

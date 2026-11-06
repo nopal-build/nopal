@@ -2,7 +2,7 @@
 // and sent again when it has changed. Three states, read from the
 // record (`sentCopyOf`-shaped fields): never sent, sent and unchanged,
 // sent and edited since. The server decides who may send
-// (`letterSend.server.ts`); the page shows this to guides only. The
+// (`letterSend.server.ts`); the page shows this to the letter's writer. The
 // public link is a second switch, on the project's Letters tab.
 //
 // And where it goes (Austin, 2026-11-05: a letter is delivered to a
@@ -20,14 +20,19 @@ import { semanticColors } from "stamps/tokens";
 import { localDateString } from "./TodayLog";
 import { dayLabel } from "./dayLabel";
 
-export const SEND_ASK = "Send this letter? It goes in their mailbox on the project page as it is now. Nothing you change after reaches them until you send again.";
-export const SEND_AGAIN_ASK = "Send the update? They see the letter as it is now, marked as updated, and their flag goes up again.";
+// The question's two halves, so naming the house in the middle can't
+// drift from the words: `sendAsk` puts them together.
+export const SEND_ASK_VERB = "Send this letter";
+export const SEND_ASK_TAIL = "It goes in their mailbox on the project page as it is now. Nothing you change after reaches them until you send again.";
+export const SEND_AGAIN_ASK_VERB = "Send the update";
+export const SEND_AGAIN_ASK_TAIL = "They see the letter as it is now, marked as updated, and their flag goes up again.";
+export const SEND_ASK = `${SEND_ASK_VERB}? ${SEND_ASK_TAIL}`;
+export const SEND_AGAIN_ASK = `${SEND_AGAIN_ASK_VERB}? ${SEND_AGAIN_ASK_TAIL}`;
 
 /** The question before a send, naming the house when it is known. */
 export function sendAsk(again: boolean, house: House | null | undefined): string {
-  const ask = again ? SEND_AGAIN_ASK : SEND_ASK;
-  if (!house) return ask;
-  return again ? ask.replace("Send the update?", `Send the update to ${HOUSE_LABEL[house]}?`) : ask.replace("Send this letter?", `Send this letter to ${HOUSE_LABEL[house]}?`);
+  const [verb, tail] = again ? [SEND_AGAIN_ASK_VERB, SEND_AGAIN_ASK_TAIL] : [SEND_ASK_VERB, SEND_ASK_TAIL];
+  return `${verb}${house ? ` to ${HOUSE_LABEL[house]}` : ""}? ${tail}`;
 }
 
 /** `sentDate` is the sender's day (YYYY-MM-DD), null before the first

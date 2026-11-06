@@ -197,7 +197,7 @@ describe("the desk", () => {
     expect(deskGroups(rows).drafts.map((r) => r.fileId)).toEqual(["d1", "r1"]);
     // Edited since it was sent, it is still a letter that went.
     expect(deskGroups(rows).letters.map((r) => r.fileId)).toEqual(["s1", "s2", "old"]);
-    const html = renderToStaticMarkup(<LettersView projectFolderId="p" rows={rows} manage={false} onChanged={() => {}} />);
+    const html = renderToStaticMarkup(<LettersView projectFolderId="p" rows={rows} manage={false} writes={false} onChanged={() => {}} />);
     expect((html.match(/data-desk-group/g) ?? []).length).toBe(2);
     expect(html.indexOf(DESK_DRAFTS)).toBeLessThan(html.indexOf("Being written"));
     expect(html.indexOf("Being written")).toBeLessThan(html.indexOf(`>${DESK_LETTERS}<`));
@@ -206,7 +206,7 @@ describe("the desk", () => {
   });
 
   it("each letter says who it is from and where it went; a draft says where it is going; a letter from before houses says neither", () => {
-    const html = renderToStaticMarkup(<LettersView projectFolderId="p" rows={rows} manage={false} onChanged={() => {}} />);
+    const html = renderToStaticMarkup(<LettersView projectFolderId="p" rows={rows} manage={false} writes={false} onChanged={() => {}} />);
     expect(html).toContain("From Lucas, to the clients");
     expect(html).toContain("From Susan, to the team");
     expect(html).toMatch(/Addressed and not sent[\s\S]*?data-letter-houses[^>]*>To the clients</);
@@ -225,7 +225,7 @@ describe("the desk", () => {
     // the writer's gate (`letterForWriter`, `mayWriteLetter`: nothing
     // for a Crafter or an Observer); the brief's own writing stays the
     // manager's.
-    expect(route("api.projects.$folderId.letters.tsx")).toMatch(/if \(!manages && !mayStartLetter\(viewer\)\) \{\s*return Response\.json\(\{ error: LETTER_START_REFUSED \}, \{ status: 403 \}\);/);
+    expect(route("api.projects.$folderId.letters.tsx")).toMatch(/if \(!mayStartLetter\(viewer\)\) \{\s*return Response\.json\(\{ error: LETTER_START_REFUSED \}, \{ status: 403 \}\);/);
     for (const name of ["talk", "outline", "recording", "send"]) {
       expect(route(`api.letter.$fileId.${name}.tsx`), name).toMatch(/letterForWriter\(request, (params\.)?fileId\)/);
     }
@@ -252,7 +252,7 @@ describe("one letter, alone", () => {
     expect(page).toContain("const user = rendering ? null : await getUser(request);");
     expect(page).toContain("const asThemself = !!user && !(await isImpersonating(request));");
     expect(page).toMatch(/const person = asThemself && request\.method === "GET" && [^;]*prefetch[^;]*;/);
-    expect(page).toContain("return { ...(await resolveLetterPage(mine.file, origin, true)), ...NO_READING, writeAt: letterDeskPath(mine.project._id, mine.file._id) };");
+    expect(page).toContain("return { ...(await resolveLetterPage(mine.file, origin, true)), ...NO_READING, writeAt: letterDeskPath(mine.project._id, mine.file._id) as string | null };");
   });
 
   it("has no Reply: writing back is a new letter started at the desk, never a button on the letter (Austin, 2026-11-05)", () => {
@@ -266,7 +266,7 @@ describe("one letter, alone", () => {
     expect(page).toMatch(/\{reflection && fileId && \(\s*<div className=\{`\$\{hideInPrint\}[^>]*data-reflection-column>\s*<LetterReflection /);
     // The box is outside the reading column, which is capped and has no room in it.
     expect(page.indexOf("</WebsitePageContent>")).toBeLessThan(page.indexOf("data-reflection-column"));
-    expect(page).toContain("return { ...page, ...(await readLetter(found.file, found.project, viewer, { lowers: person, reflects: asThemself })) };");
+    expect(page).toContain("return { ...page, ...(await readLetter(found.file, found.project, viewer, { lowers: person, reflects: asThemself })), writeAt: null as string | null };");
     expect(page).toContain("const NO_READING: LetterReading = { from: null, toHouse: null, reflection: null, writeBackIn: null };");
     // Still no action on the page: the reflection's writes are its own route's.
     expect(page).not.toMatch(/export (async )?function action/);
@@ -325,14 +325,14 @@ describe("one letter, alone", () => {
     });
     const draftRow = row({ fileId: "d1", title: "Still writing", toHouse: "clients" });
     const sentRow = row({ fileId: "s1", title: "Went out", sentDate: "2026-11-04", sentCount: 1, from: "Lucas", houses: { fromHumanId: "guideA", fromHouse: "guides", toHouse: "clients" } });
-    const manager = renderToStaticMarkup(<LettersView projectFolderId="p" rows={[draftRow, sentRow]} manage onChanged={() => {}} />);
+    const manager = renderToStaticMarkup(<LettersView projectFolderId="p" rows={[draftRow, sentRow]} manage writes onChanged={() => {}} />);
     expect((manager.match(/data-letter-edit/g) ?? []).length).toBe(2);
     expect(manager).toContain('href="/newspaper/p/letter/d1"');
     expect(manager).toContain('href="/newspaper/p/letter/s1"');
     expect((manager.match(/data-letter-delete/g) ?? []).length).toBe(1);
     expect(manager.indexOf("data-letter-delete")).toBeLessThan(manager.indexOf('data-letter="s1"'));
     // A link that was ever on is a letter someone may hold: no Delete.
-    const linked = renderToStaticMarkup(<LettersView projectFolderId="p" rows={[row({ fileId: "k1", sharedAt: "2026-10-20T10:00:00Z" })]} manage onChanged={() => {}} />);
+    const linked = renderToStaticMarkup(<LettersView projectFolderId="p" rows={[row({ fileId: "k1", sharedAt: "2026-10-20T10:00:00Z" })]} manage writes onChanged={() => {}} />);
     expect(linked).not.toContain("data-letter-delete");
     const reader = renderToStaticMarkup(<LettersView projectFolderId="p" rows={[draftRow, sentRow].map((r) => ({ ...r, writes: false }))} manage={false} writes={false} onChanged={() => {}} />);
     expect(reader).not.toMatch(/data-letter-edit|data-letter-delete|\/letter\/d1/);

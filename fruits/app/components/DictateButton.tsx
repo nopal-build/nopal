@@ -129,7 +129,10 @@ const startToday: DictationStarter = (target, handlers) => startDictation(today(
  * never sees them, so a draft's autosave never stores them. The words go
  * in at the box's cursor as dictation starts, or at the end if it never
  * had one, and keep following on from there. Typing while unsettled words
- * show takes the box over: what is typed is the caller's, as written.
+ * show takes the box over: the guess is taken back out of what was typed
+ * before it reaches the caller (ADR-032: unsettled words are never
+ * saved), and the words that settle after it go in at the cursor as
+ * usual.
  */
 export function DictatedTextBox({
   target,
@@ -178,7 +181,7 @@ export function DictatedTextBox({
           placeholder={placeholder}
           onChange={(e) => {
             setProvisional("");
-            onChange(e.target.value);
+            onChange(provisional ? withoutGuess(e.target.value, provisional) : e.target.value);
           }}
         />
       </div>
@@ -199,6 +202,13 @@ export function DictatedTextBox({
       />
     </>
   );
+}
+
+/** Typed text with the engine's unsettled guess taken back out of it
+ * (its first occurrence; the guess was inserted whole). Pure. */
+export function withoutGuess(typed: string, guess: string): string {
+  const at = typed.indexOf(guess);
+  return at === -1 ? typed : typed.slice(0, at) + typed.slice(at + guess.length);
 }
 
 /** What the box shows: the settled words, with the unsettled ones (if

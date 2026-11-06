@@ -48,20 +48,21 @@ export function LetterWriting({
   brief,
   send,
   editable,
-  writer = "guide",
+  writer,
   headerLeft,
   toolbarExtra,
   save,
   onSent,
 }: {
   file: LetterBeingWritten;
-  /** Whose letter: a client's page has no brief block. */
-  writer?: "guide" | "client";
+  /** Whose letter: a client's page has no brief block. The Vault, which
+   * a client never reaches, says "guide". */
+  writer: "guide" | "client";
   /** Where "Add picture" looks first. */
   projectFolderId: string | null;
-  /** The letter's workings, for whoever manages letters; null hides them. */
+  /** The letter's workings, for whoever may write the letter; null hides them. */
   brief: LetterBriefForPage | null;
-  /** The send's state, for whoever manages letters; null hides Send and
+  /** The send's state, for whoever may write the letter; null hides Send and
    * "Read it to them". */
   send: LetterSendState | null;
   editable: boolean;

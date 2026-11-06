@@ -116,7 +116,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // A letter's writer may put a picture or a recording beside their own
   // letter (`letterFileId`, the letter's id; `canUploadToFolder`): the
   // door a client has, since the Letters folder is otherwise a Guide's.
-  if (folder && !(await canUploadToFolder(user, folder, body.letterFileId))) {
+  if (folder && !(await canUploadToFolder(user, folder, { letterFileId: body.letterFileId, file: { type: contentType ?? "" } }))) {
     return Response.json(
       { error: "You don't have permission to upload files here" },
       { status: 403 },

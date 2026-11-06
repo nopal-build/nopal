@@ -6,8 +6,12 @@
  * (`writesInFolder`), so a client could put nothing beside their own
  * letter. This widens nothing in the Vault: a request that names the
  * letter it is for (`letterFileId`) is let in when the person may write
- * that letter (`resolveLetterForWriter`) and the folder is the letter's
- * own. Anyone else, and any other folder, is the Vault's rule as before.
+ * that letter (`resolveLetterForWriter`), the folder is the letter's
+ * own, and the file is a picture or a video. Not a markdown file: that
+ * would be a letter planted in the folder, listed on every guide's desk
+ * as theirs to send; bringing a letter in stays the manager's
+ * (`api.projects.$folderId.letters.tsx`). Anyone else, any other folder
+ * and any other kind of file is the Vault's rule as before.
  *
  * Who decides what. Code: the door. A person: what they put in the letter.
  */
@@ -17,13 +21,18 @@ import { resolveLetterForWriter } from "./letters.server";
 import { canActAsProjectOwner } from "./projectSharing.server";
 import type { VaultFolder } from "./vault.types";
 
+/** What a letter's writer may put beside it: a picture or a video. */
+export function isLetterMedia(file: { type: string }): boolean {
+  return file.type.startsWith("image/") || file.type.startsWith("video/");
+}
+
 export async function canUploadToFolder(
   user: Pick<Human, "_id" | "role">,
   folder: Pick<VaultFolder, "_id" | "human_id">,
-  letterFileId?: string | null,
+  letter?: { letterFileId?: string | null; file: { type: string } },
 ): Promise<boolean> {
   if (await canActAsProjectOwner(user._id, folder.human_id, folder._id)) return true;
-  if (!letterFileId) return false;
-  const mine = await resolveLetterForWriter(letterFileId, user);
+  if (!letter?.letterFileId || !isLetterMedia(letter.file)) return false;
+  const mine = await resolveLetterForWriter(letter.letterFileId, user);
   return !!mine && mine.file.folder_id === folder._id;
 }

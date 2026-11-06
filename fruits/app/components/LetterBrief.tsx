@@ -3,8 +3,9 @@
 // the writer's talk-through, typed or spoken here; the outline, written
 // by the model from the talk (and the brief, when there is one), and
 // edited by the writer. The letter itself is written in the editor
-// below. Guides only: the loader hands this to a manager and nobody
-// else, and the routes it calls answer nobody else.
+// below. For the letter's writer: the loader hands this to whoever may
+// write the letter and nobody else, and the routes it calls answer
+// nobody else. A client's letter has no brief (`withBrief`).
 //
 // The talk box and the outline are there with or without a brief
 // (Austin, 2026-11-05: "It also allows us to get someone's engagement
@@ -377,6 +378,9 @@ export function LetterBrief({
               disabled={busy || running || !talk.trim()}
               onClick={() => {
                 if (!window.confirm(OUTLINE_ASK)) return;
+                // The pending draft save is dropped: a late PUT would write
+                // the draft back over a row the send has already cleared.
+                if (talkTimer.current) clearTimeout(talkTimer.current);
                 void post("talk", { text: talk });
               }}
               data-outline-button

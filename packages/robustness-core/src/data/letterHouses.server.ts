@@ -23,9 +23,10 @@ export async function houseMembers(project: VaultFolder): Promise<{ human: strin
 }
 
 /** The house of someone whose role on the project is already in hand.
- * Staff with no role on a project can still send a letter there
- * (`canManageLetters`); they write as the guides' house, and hold no
- * mailbox, since the project's page isn't theirs to open. */
+ * Staff with no role read as the guides' house (they manage letters
+ * there: the link, Upload, Replace) and hold no mailbox, since the
+ * project's page isn't theirs to open; writing takes a role
+ * (`mayWriteLetter`). */
 export function houseOfActor(actor: Pick<Human, "role"> | { role?: string | null } | null | undefined, role: Pick<ResolvedProjectRole, "role"> | null | undefined): House | null {
   return houseOf(role?.role) ?? (isStaff(actor) ? "guides" : null);
 }

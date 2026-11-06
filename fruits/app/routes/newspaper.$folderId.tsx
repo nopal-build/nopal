@@ -73,7 +73,7 @@ import { LettersView } from "../components/LettersView";
 import { ShareLinkControl } from "../components/ShareLinkControl";
 import { canManageLetters, letterViewerOf, listLetters, mailboxLines } from "robustness-core/data/letters.server";
 import { flaggedLetterIds } from "robustness-core/data/letterFlags.server";
-import { deskRows, houseOf, mayStartLetter } from "robustness-core/data/letterHouses";
+import { deskRows, houseOf, mayStartLetter, projectHasClients } from "robustness-core/data/letterHouses";
 import { houseMembers } from "robustness-core/data/letterHouses.server";
 import { reflectionToStartFrom } from "robustness-core/data/letterReflection.server";
 import { letterPdfState } from "robustness-core/data/letterPdf.server";
@@ -146,6 +146,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // tab with less on it: their own drafts, the letters between the
   // houses, New letter with a title alone (`deskRows`, `LettersView`).
   const letterViewer = letterViewerOf(user._id, role);
+  // Everyone on the project with their house: the desk's filter and
+  // whether a new letter asks who it is for both read it.
+  const members = await houseMembers(folder);
   const writesLetters = tab === "letters" && mayStartLetter(letterViewer);
   // "Write a letter from this", from a letter's page (`?from=`, that
   // letter's id): the New letter form opens, told which letter the
@@ -180,7 +183,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const letters =
     tab === "letters"
       ? await Promise.all(
-          deskRows(letterRows, letterViewer, await houseMembers(folder)).map(async (row) => ({
+          deskRows(letterRows, letterViewer, members).map(async (row) => ({
             ...row,
             // The PDF is of the sent copy and exists only while the link is on.
             pdf: manageLetters && row.sharedAt && row.sentHash ? await letterPdfState(row.fileId, row.sentHash) : null,
@@ -341,7 +344,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     writesLetters,
     lettersAsClient: letterViewer.house === "clients",
     // A new letter asks who it is for when there are clients to send to.
-    lettersAskHouse: sharing.some((e) => houseOf(e.role) === "clients"),
+    lettersAskHouse: projectHasClients(members),
     letterStartFrom,
     mail,
     sensorData,

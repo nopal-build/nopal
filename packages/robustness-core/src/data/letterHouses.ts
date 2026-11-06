@@ -217,6 +217,12 @@ export function houseMembersFrom(sharing: readonly { human: string; role: string
   return [...houses.entries()].flatMap(([human, house]) => (house ? [{ human, house }] : []));
 }
 
+/** Whether the project has a clients' house to write to: what decides
+ * whether a guide is asked who a letter is for. */
+export function projectHasClients(members: readonly { house: House | null }[]): boolean {
+  return members.some((m) => m.house === "clients");
+}
+
 /** Whose flag goes up when a letter is sent to `toHouse`: everyone in
  * that house now, except the person sending and the person it is from
  * (a letter is never in its writer's own mailbox). Decided at the send,

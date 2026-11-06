@@ -103,7 +103,7 @@ export function LettersView({
   projectFolderId,
   rows,
   manage,
-  writes = manage,
+  writes,
   asClient = false,
   asksHouse = false,
   startFrom = null,
@@ -114,7 +114,7 @@ export function LettersView({
   /** Upload, Replace and the share switch. */
   manage: boolean;
   /** New letter (`mayStartLetter`). */
-  writes?: boolean;
+  writes: boolean;
   /** The viewer is a client: the form asks a title and nothing else. */
   asClient?: boolean;
   /** The project has clients, so a new letter says who it is for. */
@@ -542,6 +542,8 @@ function LetterRowView({
         <div className={sprinkles({ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 3 })}>
           {manage && (
             <>
+              {/* The link is the manager's on any sent letter; Replace
+                  rewrites the words, so only on a letter they may write. */}
               {row.sentDate ? (
                 <ShareLinkControl what="this letter" path={publicPath} endpoint={`/api/letter/${row.fileId}/share`} sharedAt={row.sharedAt} onChanged={onChanged} />
               ) : (
@@ -560,9 +562,11 @@ function LetterRowView({
                   if (file) onReplace(file);
                 }}
               />
-              <button type="button" className={textSize.xs} disabled={busy} onClick={() => replaceInput.current?.click()} style={{ background: "transparent", border: "none", color: semanticColors.textSubtle, padding: 0, cursor: "pointer" }}>
-                Replace
-              </button>
+              {row.writes && (
+                <button type="button" className={textSize.xs} disabled={busy} onClick={() => replaceInput.current?.click()} style={{ background: "transparent", border: "none", color: semanticColors.textSubtle, padding: 0, cursor: "pointer" }}>
+                  Replace
+                </button>
+              )}
             </>
           )}
           {row.writes && (

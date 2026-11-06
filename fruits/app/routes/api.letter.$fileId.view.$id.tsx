@@ -11,7 +11,9 @@ import { getPresignedViewUrl } from "robustness-core/data/file.server";
  * A file a letter's page names (`public.letter.$fileId.tsx`): served
  * while the letter's link is on, or to someone on the project once the
  * letter is sent, and only if the sent copy names the id
- * (`letterPageFile`).
+ * (`letterPageFile`); and a draft's own pictures to the letter's
+ * writer (`letterDraftFile`), for the editor's preview and the page
+ * before the send.
  * Same redirect to a short-lived presigned URL as the shared Efforts
  * page's file route. GET only.
  *

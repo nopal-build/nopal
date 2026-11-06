@@ -201,22 +201,33 @@ describe("the doors the rule stands behind", () => {
     expect(await resolveLetterForWriter("g1", person("admin", "Admin"))).toBeNull();
   });
 
-  it("the upload door: the letter's writer may put a file beside their letter, in the letter's folder and nowhere else; a Guide as before", async () => {
+  it("the upload door: the letter's writer may put a picture or a video beside their letter, in the letter's folder and nowhere else; never a markdown file (a planted letter); a Guide as before", async () => {
     file("a1", { from_human_id: "clientA" });
-    expect(await canUploadToFolder(person("clientA"), folders.letters as never, "a1")).toBe(true);
+    const pic = { type: "image/png" };
+    const clip = { type: "video/webm" };
+    const md = { type: "text/markdown" };
+    expect(await canUploadToFolder(person("clientA"), folders.letters as never, { letterFileId: "a1", file: pic })).toBe(true);
+    expect(await canUploadToFolder(person("clientA"), folders.letters as never, { letterFileId: "a1", file: clip })).toBe(true);
+    expect(await canUploadToFolder(person("clientA"), folders.letters as never, { letterFileId: "a1", file: md })).toBe(false);
+    expect(await canUploadToFolder(person("clientA"), folders.letters as never, { letterFileId: "a1", file: { type: "application/pdf" } })).toBe(false);
     expect(await canUploadToFolder(person("clientA"), folders.letters as never)).toBe(false);
-    expect(await canUploadToFolder(person("clientA"), folders.photos as never, "a1")).toBe(false);
-    expect(await canUploadToFolder(person("clientB"), folders.letters as never, "a1")).toBe(false);
-    expect(await canUploadToFolder(person("guideA"), folders.letters as never)).toBe(true);
-    expect(await canUploadToFolder(person("crafter"), folders.letters as never, "a1")).toBe(false);
+    expect(await canUploadToFolder(person("clientA"), folders.photos as never, { letterFileId: "a1", file: pic })).toBe(false);
+    expect(await canUploadToFolder(person("clientB"), folders.letters as never, { letterFileId: "a1", file: pic })).toBe(false);
+    expect(await canUploadToFolder(person("guideA"), folders.letters as never, { file: md })).toBe(true);
+    expect(await canUploadToFolder(person("crafter"), folders.letters as never, { letterFileId: "a1", file: pic })).toBe(false);
+    // The recording the worker is pointed at must be the writer's own.
+    expect(app("routes/api.letter.$fileId.recording.tsx")).toContain("!recording.s3_key?.startsWith(`vault/${got.user._id}/`)");
   });
 
-  it("a draft's files, to its writer: anything in the letter's folder whether or not the draft names it yet, a file elsewhere only when they may read it anyway, and nothing to anyone else", async () => {
+  it("a draft's files, to its writer: what they put beside it themselves whether or not the draft names it yet, a file elsewhere only when they may read it anyway, and nothing to anyone else", async () => {
     file("a1", { from_human_id: "clientA", content: "# a1\n" });
-    files.pic = { _id: "pic", human_id: "owner", name: "roof.jpg", folder_id: "letters" };
+    files.pic = { _id: "pic", human_id: "owner", name: "roof.jpg", folder_id: "letters", s3_key: "vault/clientA/letters/1-roof.jpg" };
+    files.theirs = { _id: "theirs", human_id: "owner", name: "team.jpg", folder_id: "letters", s3_key: "vault/guideA/letters/2-team.jpg" };
     files.photo = { _id: "photo", human_id: "owner", name: "day.jpg", folder_id: "photos" };
     files.foreign = { _id: "foreign", human_id: "someone", name: "costs.pdf", folder_id: "elsewhere" };
     expect((await letterDraftFile("a1", "pic", person("clientA")))?._id).toBe("pic");
+    // A picture a guide put beside another letter in the same folder is not theirs.
+    expect(await letterDraftFile("a1", "theirs", person("clientA"))).toBeNull();
     expect(await letterDraftFile("a1", "photo", person("clientA"))).toBeNull();
     readable.add("clientA:photo");
     expect((await letterDraftFile("a1", "photo", person("clientA")))?._id).toBe("photo");
@@ -258,7 +269,9 @@ describe("the doors the rule stands behind", () => {
 describe("starting a letter as a client", () => {
   it("goes to the team whatever was asked, says who it is from, needs no purpose line, records none and runs no brief", () => {
     const src = app("routes/api.projects.$folderId.letters.tsx");
-    expect(src).toContain('const asClient = !manages && viewer.house === "clients";');
+    expect(src).toContain('const asClient = viewer.house === "clients";');
+    // Starting is the desk's rule, so nobody can start a letter they could not open.
+    expect(src).toMatch(/if \(!mayStartLetter\(viewer\)\) \{\s*return Response\.json\(\{ error: LETTER_START_REFUSED \}, \{ status: 403 \}\);/);
     expect(src).toContain('const purpose = !asClient && typeof form.get("purpose") === "string" ? String(form.get("purpose")).trim() : "";');
     expect(src).toContain('if (!purpose && !asClient) return Response.json({ error: "Say what this letter is for first." }');
     expect(src).toMatch(/const address = asClient\s*\? \(\{ ok: true, toHouse: "guides" \} as const\)\s*: houseAtStart\(/);

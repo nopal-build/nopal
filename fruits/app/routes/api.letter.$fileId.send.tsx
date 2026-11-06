@@ -5,7 +5,7 @@ import { sendLetter } from "robustness-core/data/letterSend.server";
 /**
  * POST /api/letter/:fileId/send   { date, to? }
  *
- * The guide's click: the letter as it is now becomes its readers' copy
+ * The writer's click: the letter as it is now becomes its readers' copy
  * (`sendLetter`, the only writer of a letter's sent fields and of its
  * houses), its words go into the graph, the receiving house's flags go
  * up, and the PDF is remade if the link is on. Sending again replaces

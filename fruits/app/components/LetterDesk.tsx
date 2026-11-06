@@ -37,7 +37,7 @@ export function LetterDesk({
   letter,
   brief,
   send,
-  writer = "guide",
+  writer,
   onSent,
   onDeleted,
 }: {
@@ -46,7 +46,7 @@ export function LetterDesk({
   brief: LetterBriefForPage | null;
   send: LetterSendState | null;
   /** Whose letter (`letterWritingFor`): a client's has no brief block. */
-  writer?: "guide" | "client";
+  writer: "guide" | "client";
   onSent: () => void;
   /** Given the desk's address to go back to. */
   onDeleted: (desk: string) => void;

@@ -24,7 +24,7 @@
 import { merge } from "./generic.server";
 import { markDate } from "./graphLogMarks.server";
 import { raiseLetterFlags } from "./letterFlags.server";
-import { flagRecipients, houseAtSend, housesOf, mayWriteLetter, sendAsksForHouse, type House } from "./letterHouses";
+import { flagRecipients, houseAtSend, housesOf, mayWriteLetter, projectHasClients, sendAsksForHouse, type House } from "./letterHouses";
 import { houseMembers, houseOfActor } from "./letterHouses.server";
 import { enqueueLetterPdfIfSent } from "./letterPdf.server";
 import { syncLettersProjection } from "./letterSync.server";
@@ -71,7 +71,7 @@ export async function sendLetter(actor: Pick<Human, "_id" | "role">, file: FileR
   // Whoever may send is a Guide on the project (the guides' house) or a
   // client (theirs).
   const senderHouse = houseOfActor(actor, role) ?? "guides";
-  const decided = houseAtSend({ current: file, senderHouse, projectHasClients: members.some((m) => m.house === "clients"), asked: input.toHouse });
+  const decided = houseAtSend({ current: file, senderHouse, projectHasClients: projectHasClients(members), asked: input.toHouse });
   if (!decided.ok) return decided;
   const kept = housesOf(file);
   const fromHumanId = kept?.fromHumanId ?? file.from_human_id ?? file.sent_by_human_id ?? actor._id;
@@ -123,9 +123,9 @@ export async function sendLetter(actor: Pick<Human, "_id" | "role">, file: FileR
 export async function letterSendStateFor(file: FileRef): Promise<{ sentDate: string | null; sentCount: number; editedSinceSent: boolean; toHouse: House | null; asksHouse: boolean }> {
   const home = await letterHome(file);
   const members = home ? await houseMembers(home.project) : [];
-  const projectHasClients = members.some((m) => m.house === "clients");
-  const asksHouse = sendAsksForHouse({ current: file, projectHasClients });
-  const decided = asksHouse ? null : houseAtSend({ current: file, senderHouse: "guides", projectHasClients });
+  const hasClients = projectHasClients(members);
+  const asksHouse = sendAsksForHouse({ current: file, projectHasClients: hasClients });
+  const decided = asksHouse ? null : houseAtSend({ current: file, senderHouse: "guides", projectHasClients: hasClients });
   return {
     sentDate: sentCopyOf(file)?.date ?? null,
     sentCount: sentCopyOf(file)?.count ?? 0,
