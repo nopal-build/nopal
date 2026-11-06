@@ -69,6 +69,12 @@ import {
   getOrganizationsForHuman,
 } from "robustness-core/data/organizations.server";
 import { AppLayout } from "../components/AppLayout";
+import { ProfilePayments, type ProfileCharge, type ProfilePlan } from "../components/ProfilePayments";
+import { listPlans } from "robustness-core/data/billingPlans.server";
+import { describePlan } from "../data/billingNotices.server";
+import { listChargesForProjects } from "robustness-core/data/billing.server";
+import { clientProjectsFor } from "../data/payments.server";
+import { MENU_PLANS, MENU_PLAN_LABELS, formatUsd } from "robustness-core/data/billingRules";
 import { useHome } from "../hooks/useUser";
 import { displayName } from "robustness-core/data/humanNames";
 import { Input } from "stamps/Input";
@@ -97,7 +103,7 @@ function isAdminOrSuper(user: Human): boolean {
 export async function loader({ request }: LoaderFunctionArgs) {
   const user = await getUser(request);
   if (!user) return redirect("/login");
-  const [waivers, relatedHumans, passkeys, relationships, apiTokens, organizationMemberships] =
+  const [waivers, relatedHumans, passkeys, relationships, apiTokens, organizationMemberships, clientProjects] =
     await Promise.all([
       getLegalDocumentsByEmail(user.email),
       getRelatedHumans(user, { includeRevoked: true }),
@@ -105,6 +111,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       getRelationshipsForHuman(user._id),
       getApiTokensByHuman(user._id),
       getOrganizationsForHuman(user._id),
+      clientProjectsFor(user._id),
     ]);
   // Static, informational only (not editable here) — which Organization
   // this Human belongs to. Nopal is the one Organization that exists
@@ -115,6 +122,24 @@ export async function loader({ request }: LoaderFunctionArgs) {
   const organization = organizationMemberships[0]
     ? await getOrganization(organizationMemberships[0].organization_id)
     : undefined;
+
+  // The bills on every project this person is a Client on. Withdrawn
+  // ones aren't shown.
+  const projectNames = new Map(clientProjects.map((f) => [f._id, f.name]));
+  const charges = (await listChargesForProjects(clientProjects.map((f) => f._id))).filter(
+    (c) => c.status !== "canceled",
+  );
+  // Each Client project's plan, once its guide has picked one.
+  const plans: ProfilePlan[] = (await listPlans(clientProjects.map((f) => f._id)))
+    .filter((p) => p.status !== "none")
+    .map((p) => ({ folderId: p._id, project: projectNames.get(p._id) ?? "A project", view: describePlan(p, "client") }));
+  const billing: ProfileCharge[] = charges.map((c) => ({
+    id: c._id,
+    label: c.label,
+    amount: formatUsd(c.amount_cents),
+    status: c.status,
+    project: projectNames.get(c.project_folder_id) ?? "A project",
+  }));
 
   // Revoked relationships are excluded from `relatedHumans` for regular
   // Human accounts, but Admins/Supers see *everyone* regardless of
@@ -142,6 +167,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     inviteExpired,
     revokedRelationships,
     organizationName: organization?.name ?? null,
+    billing,
+    plans,
+    planLevels: MENU_PLANS.map((p) => ({ value: p, label: MENU_PLAN_LABELS[p] })),
   };
 }
 
@@ -1558,6 +1586,7 @@ function ApiTokenCard({ token }: { token: ApiToken }) {
 
 const PROFILE_SECTIONS = [
   { id: "basic", label: "Basic" },
+  { id: "payments", label: "Payments" },
   { id: "relationships", label: "Relationships" },
   { id: "security", label: "Security" },
   { id: "waivers", label: "Waivers" },
@@ -1573,7 +1602,13 @@ export default function Profile() {
     inviteExpired,
     revokedRelationships,
     organizationName,
+    billing,
+    plans,
+    planLevels,
   } = useLoaderData<typeof loader>();
+  // Payments shows only for a Client with a plan or a bill.
+  const hasPayments = billing.length > 0 || plans.length > 0;
+  const sections = PROFILE_SECTIONS.filter((s) => s.id !== "payments" || hasPayments);
   const actionData = useActionData<typeof action>();
   const { revalidate } = useRevalidator();
 
@@ -2294,6 +2329,12 @@ export default function Profile() {
               </div>
             </section>
 
+            {hasPayments && (
+              <section id="payments">
+                <ProfilePayments charges={billing} plans={plans} levels={planLevels} />
+              </section>
+            )}
+
             {/* ── Relationships ──────────────────────────────────────── */}
             <section id="relationships">
               <h2 className="font-bold text-lg mb-1">Relationships</h2>
@@ -2585,7 +2626,7 @@ export default function Profile() {
             className="hidden md:flex md:flex-col gap-1 w-40 shrink-0 md:sticky"
             style={{ top: "24px" }}
           >
-            {PROFILE_SECTIONS.map((section) => (
+            {sections.map((section) => (
               <a
                 key={section.id}
                 href={`#${section.id}`}

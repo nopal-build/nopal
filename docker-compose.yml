@@ -147,6 +147,12 @@ services:
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
       BUCKET_NAME: ${BUCKET_NAME:-local-bucket}
       REDIS_URL: redis://redis:6379
+      # Stripe test keys, from the host's `.env` (payments seed,
+      # 2026-11-02). The webhook secret is the one `stripe listen` prints.
+      # Empty when the host has none: billing then says it isn't set up.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
     command: /app/bin/dev-as-host-user.sh sh -c "pnpm install --store-dir /pnpm-store && pnpm --filter fruits run dev"
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:3000 || exit 1"]

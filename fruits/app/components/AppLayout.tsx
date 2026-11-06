@@ -136,7 +136,11 @@ type MakerSubItem = { to: string; label: string; external?: boolean };
  * for what's actually running there (self-hosted Grafana, Fly's own
  * Prometheus data, not part of this app at all). */
 function makerSubItems(user: ReturnType<typeof useUser>): MakerSubItem[] {
-  const items: MakerSubItem[] = [{ to: "/maker/projects", label: "Manage" }];
+  const items: MakerSubItem[] = [
+    { to: "/maker/projects", label: "Manage" },
+    // Every project's plan and bills, read only (payments seed).
+    { to: "/maker/payments", label: "Payments" },
+  ];
   if (permissions.isAdmin(user)) {
     items.push({ to: "/maker/graphlog", label: "GraphLog" });
     items.push({ to: "/maker/performance", label: "Performance" });
