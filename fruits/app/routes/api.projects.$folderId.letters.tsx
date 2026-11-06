@@ -17,6 +17,9 @@ import {
   splitUploadBundle,
   type UploadedPicture,
 } from "robustness-core/data/letters.server";
+import { merge } from "robustness-core/data/generic.server";
+import { houseAtStart } from "robustness-core/data/letterHouses";
+import { houseMembers } from "robustness-core/data/letterHouses.server";
 import type { FileRef } from "robustness-core/data/vault.types";
 
 // Same cap as /api/vault/upload: markdown is stored as the record's own
@@ -42,6 +45,10 @@ const MAX_INLINE_MARKDOWN_BYTES = 5 * 1024 * 1024;
  *   (`markDate`, the daily log's rule). Refused without one. An upload
  *   may carry `purpose` too; without it the letter has none until the
  *   brief asks.
+ *   A new letter also carries `to`, the house it is for ("clients" or
+ *   "guides", shown as the team): required on a project with clients,
+ *   refused without it (`houseAtStart`). An upload carries none and is
+ *   asked at Send.
  *   Starting a letter with "Write the brief first" is also the click that
  *   writes its brief (Austin, 2026-10-28; the form says so): the route
  *   asks the worker for it (`requestBrief`) once the letter and its
@@ -87,6 +94,13 @@ export async function action({ request, params }: ActionFunctionArgs) {
   if (files.length === 0) {
     if (!name) return Response.json({ error: "No file provided" }, { status: 400 });
     if (!purpose) return Response.json({ error: "Say what this letter is for first." }, { status: 400 });
+    // Who it is for, picked on the same form (Austin, 2026-11-05: "what's
+    // the title, why are you writing it, and who are you writing it to"):
+    // the clients or the team, no default; nothing to pick on a project
+    // with no clients (`houseAtStart`). Kept on the draft, and Send
+    // delivers it there.
+    const address = houseAtStart({ projectHasClients: (await houseMembers(project)).some((m) => m.house === "clients"), asked: form.get("to") });
+    if (!address.ok) return Response.json({ error: address.error }, { status: address.status });
     const folder = await ensureLettersFolder(project);
     const content = newLetterContent(name);
     const fileRef = await createFileRef({
@@ -99,6 +113,8 @@ export async function action({ request, params }: ActionFunctionArgs) {
       folder_id: folder._id,
     });
     if (!fileRef) return Response.json({ error: "The letter didn't save. Try again." }, { status: 500 });
+    // `merge`: the address is not one of the fields a save may set.
+    await merge("file_refs", fileRef._id, { to_house: address.toHouse });
     await recordPurpose(fileRef);
     // The brief starts as the letter opens. A queue that refuses leaves a
     // letter with no brief and the page's own button; never a lost letter.

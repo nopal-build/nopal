@@ -65,8 +65,9 @@ import {
   isOrgGuideForFolder,
   listFolderChildren,
 } from "robustness-core/data/vault.server";
-import { getProjectRoleForFolderId, isClientEverywhere, listProjectsFor } from "robustness-core/data/projectSharing.server";
-import { canManageLetters, letterEditedSinceSent, sentCopyOf } from "robustness-core/data/letters.server";
+import { getProjectRoleForFolderId, isClientEverywhere, listProjectsFor, writesInFolder } from "robustness-core/data/projectSharing.server";
+import { canManageLetters } from "robustness-core/data/letters.server";
+import { letterSendStateFor } from "robustness-core/data/letterSend.server";
 import { LetterSendControl, sendStateAfterSaves, type LetterSendState } from "../components/LetterSendControl";
 import { getLetterBriefForPage, type LetterBriefForPage } from "robustness-core/data/brief.server";
 import { nameSyncedAuthors, type ListedFile } from "robustness-core/data/syncedAuthors.server";
@@ -373,7 +374,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const role = await timeRequestPerf("fn", "getProjectRoleForFolderId", { folderId: fileFolderId }, () =>
         getProjectRoleForFolderId(fileFolderId, user._id),
       );
-      viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
+      // In the Letters folder writing is a Guide's alone (`writesInFolder`),
+      // so a Crafter's letter page is the read-only one, not an editor
+      // whose saves are refused.
+      viewerIsOwnerTierOnProject = writesInFolder(role, ancestry[ancestry.length - 1] ?? {});
       viewerGuidesProject = Boolean(role?.guiding);
       const fileContainingFolder = ancestry[ancestry.length - 1];
       if (fileContainingFolder) {
@@ -388,7 +392,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
       );
       if (canManageLetters(user, roleForLetter)) {
         letterBrief = await timeRequestPerf("fn", "getLetterBriefForPage", { fileId: file._id }, () => getLetterBriefForPage(file._id));
-        letterSend = { sentDate: sentCopyOf(file)?.date ?? null, sentCount: sentCopyOf(file)?.count ?? 0, editedSinceSent: letterEditedSinceSent(file) };
+        // With where it goes: decided already, or the guide's to say (`houseAtSend`).
+        letterSend = await letterSendStateFor(file);
       }
     }
     const websiteAnchorForFile = findWebsiteAnchor(ancestry);
@@ -462,7 +467,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const role = await timeRequestPerf("fn", "getProjectRoleForFolderId", { folderId: folder._id }, () =>
         getProjectRoleForFolderId(folder._id, user._id),
       );
-      viewerIsOwnerTierOnProject = Boolean(role?.isOwner);
+      viewerIsOwnerTierOnProject = writesInFolder(role, folder);
       viewerGuidesProject = Boolean(role?.guiding);
       viewerIsOrgGuideOnOrgFolder = await timeRequestPerf("fn", "isOrgGuideForFolder", { folderId: folder._id }, () =>
         isOrgGuideForFolder(user._id, folder),

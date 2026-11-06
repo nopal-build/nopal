@@ -20,14 +20,32 @@
 // points it at the letter's own route instead, and `letterFileIds`
 // (`letters.server.ts`) separately allows the id through server-side.
 //
+// Around the letter (Austin, 2026-11-05; `letterReading.server.ts`): who
+// it is from, for every reader; and for someone on the project who is
+// shown it, the house it went to. One letter at a time: no thread, no
+// quoted text, nothing under the open letter. And no Reply: writing back
+// is a new letter started at the desk, never a button here ("that feels
+// like an email").
+//
+// Opening this page is what lowers the reader's own mailbox flag for the
+// letter, and nothing else does (the mailbox's list doesn't). It is a
+// write in a loader, on purpose: there is no action here, and the write
+// is the reader's alone. It happens above the doors, since the link-on
+// door answers before anyone is asked who they are; never under a render
+// pass, for a preview, on a prefetch, or for an admin viewing as someone.
+//
 // The PDF is this page, printed by the worker (`letterPdf.server.ts`);
 // the download links take Stamps' `hideInPrint` so the file carries no
 // button to itself, and `oxmarkdown.css` sets the type for paper.
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { useLoaderData } from "react-router";
-import { resolveLetterPage, resolveLetterForManager, resolveSentLetter, resolveSentLetterForMember, resolveSharedLetter } from "robustness-core/data/letters.server";
+import { resolveLetterPage, resolveLetterForManager, resolveSentLetter, resolveSentLetterForMember, resolveSharedLetter, type LetterPage } from "robustness-core/data/letters.server";
+import { readLetter, type LetterReading } from "robustness-core/data/letterReading.server";
+import { HOUSE_LABEL } from "robustness-core/data/letterHouses";
 import { requestHasRenderPass } from "robustness-core/data/letterRenderPass.server";
-import { getUser } from "../modules/auth/auth.server";
+import type { Human } from "robustness-core/data/humans.server";
+import type { FileRef, VaultFolder } from "robustness-core/data/vault.types";
+import { getUser, isImpersonating } from "../modules/auth/auth.server";
 import { AuthShell } from "../components/AuthShell";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
@@ -38,27 +56,44 @@ import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import { hideInPrint } from "stamps/print.css";
 
+const NO_READING: LetterReading = { from: null, toHouse: null };
+
+/** The page with what goes around the letter for this reader
+ * (`readLetter`). `person` is the signed-in reader when this request is
+ * their own opening of the letter, which lowers their flag for it. */
+async function opened(found: { file: FileRef; project: VaultFolder }, page: LetterPage, viewer: Human | null, person: boolean) {
+  return { ...page, ...(await readLetter(found.file, found.project, viewer, { lowers: person })) };
+}
+
 export async function loader({ request, params }: LoaderFunctionArgs) {
   const origin = new URL(request.url).origin;
   const shared = params.fileId ? await resolveSharedLetter(params.fileId) : null;
+  const rendering = !!params.fileId && (await requestHasRenderPass(request, params.fileId));
+  // A person's own opening: signed in, a plain GET, not the worker's
+  // render, not a prefetch, and not an admin viewing as them.
+  const user = rendering ? null : await getUser(request);
+  const person = !!user && request.method === "GET" && !/prefetch/i.test(request.headers.get("Sec-Purpose") ?? request.headers.get("Purpose") ?? "") && !(await isImpersonating(request));
   // The whole of what leaves the server (`letterPage`, resolved via
   // `resolveLetterPage` so a `::LoadCellGraph{fileId="..."}` directive in
   // the body renders for real instead of showing as an unknown block).
-  if (shared) return resolveLetterPage(shared.file, origin);
+  // The link on: anyone, no login. Someone on the project who opens it
+  // this way has still opened it.
+  if (shared) return opened(shared, await resolveLetterPage(shared.file, origin), user, person);
   // Link off, sent: the worker printing it, with no session.
-  const printing = params.fileId && (await requestHasRenderPass(request, params.fileId)) ? await resolveSentLetter(params.fileId) : null;
-  if (printing) return resolveLetterPage(printing.file, origin);
-  const user = await getUser(request);
+  const printing = params.fileId && rendering ? await resolveSentLetter(params.fileId) : null;
+  if (printing) return opened(printing, await resolveLetterPage(printing.file, origin), null, false);
   // Link off, sent: someone on the project reads the sent copy logged
   // in, the pictures served by the letter's own routes with the session.
+  // A letter the guides sent the guides is not there for a Client
+  // (`resolveSentLetterForMember`).
   const sent = user && params.fileId ? await resolveSentLetterForMember(params.fileId, user._id) : null;
-  if (sent) return resolveLetterPage(sent.file, origin);
+  if (sent) return opened(sent, await resolveLetterPage(sent.file, origin), user, person);
   // Not sent: a Guide on the project still sees the page as the client
   // will (the tab's title always opens this), with the session serving
   // the pictures and no downloads. Anyone else: not found, as before.
   const mine = user && params.fileId ? await resolveLetterForManager(params.fileId, user) : null;
   if (!mine) throw new Response("Not Found", { status: 404 });
-  return resolveLetterPage(mine.file, origin, true);
+  return { ...(await resolveLetterPage(mine.file, origin, true)), ...NO_READING };
 }
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => {
@@ -76,7 +111,7 @@ export const meta: MetaFunction<typeof loader> = ({ data }) => {
 };
 
 export default function PublicLetterPage() {
-  const { title, showTitle, updated, resent, body, downloadUrl, pdfUrl, preview, loadCellGraphs, videoViewUrlBase } = useLoaderData<typeof loader>();
+  const { title, showTitle, updated, resent, body, downloadUrl, pdfUrl, preview, loadCellGraphs, videoViewUrlBase, from, toHouse } = useLoaderData<typeof loader>();
   // The letter's own `/api/letter/:fileId/download` route already encodes
   // its fileId (`downloadUrl` above) -- a `::LoadCellGraph{...}`'s raw/
   // cleaned CSV downloads from the SAME route family, just one path
@@ -99,10 +134,22 @@ export default function PublicLetterPage() {
   );
   return (
     <AuthShell maxWidth="820px">
+      {/* One column for everything: who it is from and the letter share
+          the letter's own inset, so the lines above start where the
+          words do. */}
+      <WebsitePageContent>
       {/* The file's own `# ` heading is the title when it has one; the
           header repeats nothing. */}
       <header className={sprinkles({ mb: 8 })}>
         {showTitle && <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>{title}</h1>}
+        {/* Who wrote it, for every reader; where it went, for someone on
+            the project it is shown to. */}
+        {from && (
+          <p className={textSize.sm} data-letter-from>
+            From {from}
+            {toHouse && `, to ${HOUSE_LABEL[toHouse]}`}
+          </p>
+        )}
         <p className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
           {preview ? `Updated ${updated}` : `Sent ${updated}`}
           {resent && <span data-resent>{" · "}updated</span>}
@@ -123,7 +170,6 @@ export default function PublicLetterPage() {
           )}
         </p>
       </header>
-      <WebsitePageContent>
         <OxRenderer
           markdown={body}
           directives={{ ...buildWebsiteDirectiveRegistry({ dailyLogEntries: {} }), ...loadCellDirectives }}

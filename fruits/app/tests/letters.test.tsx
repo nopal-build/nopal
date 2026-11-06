@@ -21,8 +21,8 @@ import {
   letterShareRefusal,
   letterTitle,
   isLettersFolder,
+  mailboxLines,
   publicLetterBody,
-  sentLetterLinks,
 } from "robustness-core/data/letters.server";
 import { resolveRole } from "robustness-core/data/projectSharing.server";
 import { featuresOf } from "robustness-core/data/features";
@@ -33,7 +33,7 @@ import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import { LettersView, NewLetterModal, pdfLine } from "../components/LettersView";
 import { LetterBrief, isLetterOnlyItsHeading, splitBriefHalves } from "../components/LetterBrief";
-import { LettersTile } from "../components/LettersTile";
+import { MailList } from "../components/ProjectMailbox";
 import { LetterSendControl, SEND_AGAIN_ASK, SEND_ASK, sendStateAfterSaves } from "../components/LetterSendControl";
 import { preparingPage } from "robustness-core/data/letterPdf.server";
 
@@ -276,24 +276,27 @@ describe("the tab", () => {
     expect(tabsFor(featuresOf("Observer"))).toContain("letters");
   });
 
-  it("the banner's tile lists what is sent, not merely shared, each with its date, and is absent with nothing sent", () => {
-    const links = sentLetterLinks(rows);
-    expect(links).toEqual([{ fileId: FILE, title: "Madison attic", path: `/public/letter/${FILE}`, sentDate: "2026-10-22", updated: true }]);
-    const html = renderToStaticMarkup(<LettersTile links={links} />);
-    expect(html).toContain("data-letters-tile");
+  // The tile became the mailbox on 2026-11-05 (`mailbox.test.tsx` has
+  // the rest). A letter sent before houses is in everyone's, as it was
+  // on everyone's tile.
+  it("the mailbox lists what is sent, not merely shared, each with its date; a letter from before houses shows to anyone and raises no flag", () => {
+    const lines = mailboxLines(rows, { humanId: "client1", house: "clients" }, new Set([FILE]));
+    expect(lines).toEqual([{ fileId: FILE, title: "Madison attic", path: `/public/letter/${FILE}`, sentDate: "2026-10-22", updated: true, fromHumanId: null, unopened: false }]);
+    const html = renderToStaticMarkup(<MailList mail={lines.map(({ fromHumanId: _from, ...l }) => ({ ...l, from: null }))} />);
     expect(html).toContain(`href="/public/letter/${FILE}"`);
-    expect(html).toContain("sent Oct 22, 2026");
+    expect(html).toContain("Oct 22, 2026");
     expect(html).toContain(", updated");
     expect(html).not.toContain("draft1");
-    expect(renderToStaticMarkup(<LettersTile links={sentLetterLinks([rows[1], rows[2]])} />)).toBe("");
+    expect(html).not.toContain("data-unopened");
+    expect(mailboxLines([rows[1], rows[2]], { humanId: "client1", house: "clients" })).toEqual([]);
   });
 
   const rows = [
-    { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z", contentHash: "h1", purpose: "Tell Susan what the attic floor should be.", sentDate: "2026-10-22", sentCount: 2, sentHash: "h0", editedSinceSent: true, pdf: { state: "failed" as const, reason: "the public page answered 500", at: "2026-10-21T09:01:00Z" } },
-    { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null, contentHash: "h2", purpose: null, sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, pdf: null },
+    { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z", contentHash: "h1", purpose: "Tell Susan what the attic floor should be.", sentDate: "2026-10-22", sentCount: 2, sentHash: "h0", editedSinceSent: true, houses: null, toHouse: null, pdf: { state: "failed" as const, reason: "the public page answered 500", at: "2026-10-21T09:01:00Z" } },
+    { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null, contentHash: "h2", purpose: null, sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, toHouse: null, pdf: null },
     // Shared with the link on but never sent can't happen from here on
     // (`letterShareRefusal`); a row like it reads as unsent.
-    { fileId: "odd1", name: "odd.md", title: "Odd", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: "2026-10-20T09:00:00Z", contentHash: "h3", purpose: null, sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, pdf: null },
+    { fileId: "odd1", name: "odd.md", title: "Odd", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: "2026-10-20T09:00:00Z", contentHash: "h3", purpose: null, sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, toHouse: null, pdf: null },
   ];
 
   it("a reader sees the list and no controls; a sent page is the client's link, an unsent one is not a link", () => {
@@ -383,8 +386,8 @@ describe("the purpose line (2026-10-28)", () => {
   });
 
   const rows = [
-    { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z", contentHash: "h1", purpose: "Tell Susan what the attic floor should be.", sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, pdf: null },
-    { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null, contentHash: "h2", purpose: null, sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, pdf: null },
+    { fileId: FILE, name: "madison-attic.md", title: "Madison attic", updatedAt: "2026-10-21T08:00:00Z", size: 10, sharedAt: "2026-10-21T09:00:00Z", contentHash: "h1", purpose: "Tell Susan what the attic floor should be.", sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, toHouse: null, pdf: null },
+    { fileId: "draft1", name: "draft.md", title: "Draft", updatedAt: "2026-10-20T08:00:00Z", size: 10, sharedAt: null, contentHash: "h2", purpose: null, sentDate: null, sentCount: 0, sentHash: null, editedSinceSent: false, houses: null, toHouse: null, pdf: null },
   ];
 });
 

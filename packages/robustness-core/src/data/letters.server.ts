@@ -32,6 +32,13 @@
  *   replace shows at once under the same link. Off, or a trashed
  *   project, is a 404.
  * - Nothing turns a link on at upload. A person does.
+ * - Who is shown a sent letter (Austin, 2026-11-05): it is delivered to
+ *   a house, the clients' or the guides', and shown to the house it went
+ *   to and the house it came from (`letterHouses.ts`). The mailbox on the
+ *   project's page holds what came to the viewer's house
+ *   (`mailboxLines`); the member's door refuses a Client a letter the
+ *   guides sent the guides (`resolveSentLetterForMember`). A letter sent
+ *   before houses has none and shows to everyone, as it did.
  *
  * The PDF is the public page printed by the worker, keyed by the file's
  * content hash (`letterPdf.server.ts`). The share route, the replace
@@ -50,6 +57,7 @@
 
 import crypto from "node:crypto";
 import { isStaff, type Human } from "./humans.server";
+import { addressedTo, houseMayOpen, houseOf, housesInMailbox, housesOf, type House, type LetterHouses } from "./letterHouses";
 import { findOwningProjectFolder, getProjectRole, type ResolvedProjectRole } from "./projectSharing.server";
 import { getProjectStatus } from "./projectStatus.server";
 import { merge } from "./generic.server";
@@ -129,6 +137,12 @@ export type LetterRow = {
   sentHash: string | null;
   /** The draft differs from what the client has. */
   editedSinceSent: boolean;
+  /** Who it is from and its two houses (`letterHouses.ts`); null for a
+   * draft and for a letter sent before houses. */
+  houses: LetterHouses | null;
+  /** Where it is going: its house once sent, else where its draft was
+   * addressed when it was started (`addressedTo`); null when neither. */
+  toHouse: House | null;
 };
 
 /** The client's copy of a letter: what was sent, when, and how many
@@ -227,6 +241,8 @@ export async function listLetters(project: VaultFolder): Promise<LetterRow[]> {
       sentCount: sentCopyOf(f)?.count ?? 0,
       sentHash: sentCopyOf(f)?.hash ?? null,
       editedSinceSent: letterEditedSinceSent(f),
+      houses: housesOf(f),
+      toHouse: addressedTo(f),
     }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
@@ -332,11 +348,21 @@ export async function ensureSentCopy(file: FileRef): Promise<FileRef> {
  * included: ADR-023 keeps them out of the cache, so this is their door)
  * when the link is off. Null for a draft, for someone off the project,
  * or for a trashed project.
+ *
+ * And null for a letter that has a house and neither came from nor went
+ * to the viewer's (`houseMayOpen`, Austin 2026-11-05): a Client and a
+ * letter the guides sent to the guides. This is a Client's only door to
+ * a sent letter's words, its pictures and its PDF (the letter's routes
+ * all ask it, through `resolveReadableLetter` or directly), so the
+ * refusal is here once. A letter with no house is past the check before
+ * anyone's house is looked at, and reads as it always did.
  */
 export async function resolveSentLetterForMember(fileId: string, humanId: string): Promise<{ file: FileRef; project: VaultFolder } | null> {
   const sent = await resolveSentLetter(fileId);
   if (!sent) return null;
-  if (!(await getProjectRole(sent.project, humanId))) return null;
+  const role = await getProjectRole(sent.project, humanId);
+  if (!role) return null;
+  if (!houseMayOpen(sent.file, houseOf(role.role))) return null;
   return sent;
 }
 
@@ -377,14 +403,36 @@ export function letterPublicPath(fileId: string): string {
   return `/public/letter/${fileId}`;
 }
 
-/** What the banner's Letters tile lists: the sent ones, by title, each
- * to the letter's page, where a member reads the sent copy logged in.
- * Everyone on the project sees the same tile, so a Guide sees what the
- * client sees. Pure. */
-export function sentLetterLinks(rows: Pick<LetterRow, "fileId" | "title" | "sentDate" | "sentCount">[]): { fileId: string; title: string; path: string; sentDate: string; updated: boolean }[] {
+/** One line in the mailbox: a sent letter that came to the viewer's
+ * house. `unopened` is the viewer's own flag for that letter and nobody
+ * else's. */
+export type MailLine = { fileId: string; title: string; path: string; sentDate: string; updated: boolean; fromHumanId: string | null; unopened: boolean };
+
+/** What is in someone's mailbox (`housesInMailbox`): the letters sent to their
+ * house by someone other than them, kept after they are opened, newest
+ * send day first; and every letter sent before houses, which nothing can
+ * place and which goes on showing to everyone. `flagged` is the viewer's
+ * own flags (`flaggedLetterIds`); a letter with no house never has one.
+ * The flag on the project's page is "any line here is unopened", so a row
+ * left behind by a letter that is gone raises nothing. Pure. */
+export function mailboxLines(
+  rows: readonly Pick<LetterRow, "fileId" | "title" | "sentDate" | "sentCount" | "houses">[],
+  viewer: { humanId: string; house: House | null },
+  flagged: ReadonlySet<string> = new Set(),
+): MailLine[] {
   return rows
     .filter((r): r is typeof r & { sentDate: string } => !!r.sentDate)
-    .map((r) => ({ fileId: r.fileId, title: r.title, path: letterPublicPath(r.fileId), sentDate: r.sentDate, updated: r.sentCount > 1 }));
+    .filter((r) => housesInMailbox(r.houses, viewer))
+    .map((r) => ({
+      fileId: r.fileId,
+      title: r.title,
+      path: letterPublicPath(r.fileId),
+      sentDate: r.sentDate,
+      updated: r.sentCount > 1,
+      fromHumanId: r.houses?.fromHumanId ?? null,
+      unopened: !!r.houses && flagged.has(r.fileId),
+    }))
+    .sort((a, b) => b.sentDate.localeCompare(a.sentDate));
 }
 
 /** The file as the public page shows it: no front matter, every file URL

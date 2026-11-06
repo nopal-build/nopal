@@ -20,12 +20,13 @@ export const CLIENT: Group = "Client";
 export const FEATURE_NAMES = [
   /** The Efforts page (the project README the skills write). */
   "efforts",
-  /** The Letters tab: where a guide works on the pages a client
-   * gets, each with its own public link (`letters.server.ts`).
-   * Reading only; uploading, replacing and the share switch are a
-   * Guide's. A Client has no tab: what is shared reaches them as the
-   * Letters tile in the project's banner (Austin, 2026-10-22: "the
-   * tab is for deliverables that are being worked"). */
+  /** The Letters tab, which is the desk: where letters are written and
+   * kept (`letters.server.ts`, `letterHouses.ts`). Reading only;
+   * starting, writing, sending and the share switch are a Guide's, in
+   * the Letters folder too (`writesInFolder`): Crafters and Observers
+   * read. A Client has no tab yet: mail reaches everyone, a Client
+   * included, at the mailbox in the project's banner (Austin,
+   * 2026-11-05), and clients get the desk when they write. */
   "letters",
   /** The Photos tab, and the photos themselves, never a cost file. */
   "photos",
