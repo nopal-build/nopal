@@ -459,13 +459,16 @@ export type LetterBriefRow = Data & {
   /** The job asked for and not yet finished, so a second click waits. */
   pending_job_id: string | null;
   // ── The talk-through and the outline (`outline.server.ts`) ──
-  /** What the guide has typed and not yet put on the record. */
+  /** What the writer has typed and not yet handed over. */
   talk_draft?: string | null;
-  /** The talk as it went onto the guide's Card, when they asked for the outline. */
+  /** The talk as given, when they asked for the outline. It waits here
+   * until the letter is sent (`outline.server.ts`, `landTalkThrough`). */
   talk_through?: string | null;
   talk_through_at?: string | null;
   talk_through_by_human_id?: string | null;
-  /** The day it was written to, the device's date clamped by `markDate`. */
+  /** The day it went onto its speaker's Card, and that Card: both null
+   * while it waits for Send. A talk given before 2026-11-05 has both
+   * from the moment it was given. */
   talk_through_date?: string | null;
   talk_through_card_file_id?: string | null;
   outline?: string | null;
@@ -652,7 +655,9 @@ export type LetterJobForPage = { state: "waiting" | "active" | "failed" | "compl
 export type LetterBriefForPage = {
   brief: { content: string; writtenAt: string; byName: string; incomplete: string[] } | null;
   job: LetterJobForPage | null;
-  talk: { draft: string | null; sent: { text: string; at: string; date: string; byName: string } | null };
+  /** `sent` is the talk once given. `onRecord` is the day it went onto
+   * its speaker's Card, null while it waits for the letter to be sent. */
+  talk: { draft: string | null; sent: { text: string; at: string; onRecord: string | null; byName: string } | null };
   outline: { content: string; writtenAt: string; byName: string; incomplete: string[]; editedAt: string | null } | null;
   outlineJob: LetterJobForPage | null;
 };
@@ -671,6 +676,13 @@ async function jobForPage(jobId: string | null | undefined): Promise<LetterJobFo
   };
 }
 
+/** The day a talk-through went onto its speaker's Card, or null while it
+ * waits for the letter to be sent. The Card is what says it landed. Pure. */
+export function talkOnRecord(row: Pick<LetterBriefRow, "talk_through_at" | "talk_through_date" | "talk_through_card_file_id">): string | null {
+  if (!row.talk_through_card_file_id) return null;
+  return row.talk_through_date ?? row.talk_through_at?.slice(0, 10) ?? null;
+}
+
 export async function getLetterBriefForPage(letterFileId: string): Promise<LetterBriefForPage> {
   const row = await getLetterBriefRow(letterFileId);
   const ids = [row?.by_human_id, row?.talk_through_by_human_id, row?.outline_by_human_id].filter((v): v is string => !!v);
@@ -679,7 +691,10 @@ export async function getLetterBriefForPage(letterFileId: string): Promise<Lette
   const brief = row?.content && row.written_at ? { content: row.content, writtenAt: row.written_at, byName: nameOf(row.by_human_id), incomplete: row.incomplete ?? [] } : null;
   const talk = {
     draft: row?.talk_draft ?? null,
-    sent: row?.talk_through && row.talk_through_at ? { text: row.talk_through, at: row.talk_through_at, date: row.talk_through_date ?? row.talk_through_at.slice(0, 10), byName: nameOf(row.talk_through_by_human_id) } : null,
+    sent:
+      row?.talk_through && row.talk_through_at
+        ? { text: row.talk_through, at: row.talk_through_at, onRecord: talkOnRecord(row), byName: nameOf(row.talk_through_by_human_id) }
+        : null,
   };
   const outline = row?.outline && row.outline_written_at ? { content: row.outline, writtenAt: row.outline_written_at, byName: nameOf(row.outline_by_human_id), incomplete: row.outline_incomplete ?? [], editedAt: row.outline_edited_at ?? null } : null;
   return { brief, job: await jobForPage(row?.pending_job_id), talk, outline, outlineJob: await jobForPage(row?.outline_pending_job_id) };

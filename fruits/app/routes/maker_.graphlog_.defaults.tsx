@@ -26,7 +26,7 @@ import {
   getAllEffectiveGraphLogDefaultSkills,
   getGraphLogDefaultsLastEdit,
   setGraphLogDefaultSkillOverride,
-  type GraphLogDefaultStage,
+  type GraphLogAnyDefaultStage,
 } from "robustness-core/data/graphLogDefaults.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 import { withRequestPerf } from "robustness-core/data/requestPerf.server";
@@ -67,7 +67,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
   );
 }
 
-const VALID_STAGES = new Set<GraphLogDefaultStage>(["knowledge", "filing", "graph", "graphStructure", "projectView", "voice", "sow", "brief", "outline"]);
+const VALID_STAGES = new Set<GraphLogAnyDefaultStage>(["knowledge", "filing", "graph", "graphStructure", "projectView", "voice", "sow", "brief", "outline", "outlineTalk"]);
 
 /**
  * Saves or resets one stage's default-skill override -- see
@@ -81,7 +81,7 @@ export async function action({ request }: ActionFunctionArgs) {
 
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
-  const stage = String(form.get("stage") ?? "") as GraphLogDefaultStage;
+  const stage = String(form.get("stage") ?? "") as GraphLogAnyDefaultStage;
   if (!VALID_STAGES.has(stage)) {
     return data({ ok: false, intent, stage, error: "Unknown stage" }, { status: 400 });
   }
@@ -143,7 +143,7 @@ export function ErrorBoundary() {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-const STAGE_META: Record<GraphLogDefaultStage, { title: string; file: string; blurb: string }> = {
+const STAGE_META: Record<GraphLogAnyDefaultStage, { title: string; file: string; blurb: string }> = {
   knowledge: {
     title: "Knowledge",
     file: "skills/KNOWLEDGE.md",
@@ -188,6 +188,11 @@ const STAGE_META: Record<GraphLogDefaultStage, { title: string; file: string; bl
     file: "skills/OUTLINE.md",
     blurb: "Seeded into a brand new project's OUTLINE.md: the outline a guide writes one letter from, built from their talk-through of the brief: each line a logged fact, cited, or a position the guide took, the model adding no reasons of its own; then what the brief holds that the talk skipped, what the talk said that nothing logged backs, and one thing for the client to go do. Read by the brief stage's outline call alone, when a guide writes the outline. Length is counted by code. A project with no OUTLINE.md uses this default.",
   },
+  outlineTalk: {
+    title: "Outline, no brief",
+    file: "no file: this default is used as it is",
+    blurb: "The outline for a letter that has no brief, made from the writer's talk-through and nothing else: no brief, no node, nothing a project keeps in skills/. The writer may be a guide or a client. Never seeded into a project: every project reads this one. Read by the brief stage's outline call when the letter has no brief. Length is counted by code, never stated here.",
+  },
 };
 
 /**
@@ -202,7 +207,7 @@ function DefaultSkillEditor({
   initialContent,
   overridden,
 }: {
-  stage: GraphLogDefaultStage;
+  stage: GraphLogAnyDefaultStage;
   initialContent: string;
   overridden: boolean;
 }) {
@@ -385,6 +390,11 @@ export default function FruitsMakerGraphLogDefaults() {
             stage="outline"
             initialContent={defaultSkills.outline.content}
             overridden={defaultSkills.outline.overridden}
+          />
+          <DefaultSkillEditor
+            stage="outlineTalk"
+            initialContent={defaultSkills.outlineTalk.content}
+            overridden={defaultSkills.outlineTalk.overridden}
           />
         </div>
       </div>

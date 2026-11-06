@@ -1,17 +1,22 @@
 // The chain on a letter's page (Austin, 2026-10-22 to 28): the brief,
 // written by a model from the whole graph when the letter was started;
-// the guide's talk-through of it, typed here and put on their Card for
-// the day when they ask for the outline; the outline, written by the
-// model from the talk and the brief, and edited by the guide. The letter
-// itself is written in the editor below. Guides only: the loader hands
-// this to a manager and nobody else, and the routes it calls answer
-// nobody else.
+// the writer's talk-through, typed or spoken here; the outline, written
+// by the model from the talk (and the brief, when there is one), and
+// edited by the writer. The letter itself is written in the editor
+// below. Guides only: the loader hands this to a manager and nobody
+// else, and the routes it calls answer nobody else.
+//
+// The talk box and the outline are there with or without a brief
+// (Austin, 2026-11-05: "It also allows us to get someone's engagement
+// and thoughts into the project"). Without one the outline is made from
+// the talk alone. Either way the talk goes on the project's record when
+// the letter is sent, not when it is given.
 //
 // Who decides what. A person: starting the letter, the talk, "Write the
-// outline", editing the outline, "Write it again", and what to make of
-// any of it. Code: the jobs and their state, the Card write, that the
-// brief and outline are read-only here unless the guide edits the
-// outline (`OxRenderer`, no pen). The model: the words.
+// outline", editing the outline, "Write it again", sending, and what to
+// make of any of it. Code: the jobs and their state, the Card write at
+// Send, that the brief and outline are read-only here unless the writer
+// edits the outline (`OxRenderer`, no pen). The model: the words.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LetterBriefForPage, LetterJobForPage } from "robustness-core/data/brief.server";
 import { splitFrontmatter } from "robustness-core/data/project.types";
@@ -26,14 +31,20 @@ import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import OxRenderer from "./OxRenderer";
 import { DictateIntoText } from "./DictateButton";
-import { localDateString } from "./TodayLog";
 
 /** The sentence under the New letter form, and the confirms on the
  * controls that run the model: each is a run, and the click is the
  * decision (the print button's rule, Austin, 2026-10-01 and 2026-10-28). */
 export const BRIEF_RUN_NOTE = "Writing the brief first is a model run over everything logged on this project. It takes a few minutes, and each brief costs a run. Going straight to the letter runs nothing, and you can write the brief later from the letter.";
 export const BRIEF_AGAIN_ASK = "Write the brief again? It reads everything logged on this project since, replaces this one, and each brief costs a model run.";
-export const OUTLINE_ASK = "Put your talk-through on the project's record as yours, today, and write the outline? Each outline costs a model run.";
+export const OUTLINE_ASK = "Write the outline from what you said? Each outline costs a model run. What you said goes on the project's record as yours when you send the letter.";
+/** Under the talk box, and beside the talk once it is given. */
+export const TALK_HINT = "In your own words, once, top to bottom. It goes on the project's record as yours when you send the letter.";
+export const TALK_WAITS = "They go on the project's record when the letter is sent.";
+/** What the talk box asks for: about the brief when there is one to
+ * read, about the letter when there isn't. */
+export const TALK_PROMPT_WITH_BRIEF = "What makes sense, what doesn't, how the pieces fit.";
+export const TALK_PROMPT = "What you want this letter to say, and why it matters.";
 export const OUTLINE_AGAIN_ASK = "Write the outline again from the same talk-through? It replaces this one, and each outline costs a model run.";
 
 /** A letter not yet written: front matter and its own title heading, and
@@ -132,6 +143,11 @@ export function LetterBrief({
   const [message, setMessage] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [talk, setTalk] = useState(initial.talk.draft ?? "");
+  // Beside a brief the talk box is up, as it was. With no brief it is up
+  // while the letter is still to be written or a talk is half typed, and
+  // one line otherwise, so a finished letter doesn't carry an empty box.
+  const [talkOpen, setTalkOpen] = useState(!!initial.brief || openByDefault || !!initial.talk.draft);
+  const hadBrief = useRef(!!initial.brief);
   const talkFieldRef = useRef<HTMLDivElement>(null);
   const [talkSaved, setTalkSaved] = useState<"" | "Saving…" | "Saved">("");
   const [editing, setEditing] = useState(false);
@@ -171,6 +187,14 @@ export function LetterBrief({
       clearInterval(poll);
     };
   }, [running, refresh]);
+
+  // A brief arriving brings the talk box up beside it.
+  useEffect(() => {
+    if (state.brief && !hadBrief.current) {
+      hadBrief.current = true;
+      setTalkOpen(true);
+    }
+  }, [state.brief]);
 
   // The outline arriving opens itself and folds the brief away.
   const hadOutline = useRef(!!initial.outline);
@@ -277,8 +301,11 @@ export function LetterBrief({
           stays in view as the brief scrolls. A Stack once the talk is on
           the record. */}
       {(() => {
-        const sideBySide = !!(briefOpen && state.brief && !state.talk.sent);
+        const sideBySide = !!(briefOpen && state.brief && !state.talk.sent && talkOpen);
         const Chain = sideBySide ? Grid : Stack;
+        // Nothing to hold once the talk is given and the brief is folded
+        // or absent: no empty row between the brief's line and the talk.
+        if (!(briefOpen && state.brief) && state.talk.sent) return null;
         return (
       <Chain gap={sideBySide ? 6 : 4} {...(sideBySide ? { minColumnWidth: 320, style: { alignItems: "start" } } : {})} data-chain-layout={sideBySide ? "side-by-side" : "stacked"}>
       {briefOpen && state.brief && (
@@ -303,23 +330,31 @@ export function LetterBrief({
       )}
 
       {/* ── The talk-through ── */}
-      {state.brief && !state.talk.sent && (
-        <Stack gap={2} data-letter-talk style={sideBySide ? { position: "sticky", top: 12 } : undefined}>
+      {!state.talk.sent && (
+        <Stack gap={2} data-letter-talk data-talk-open={talkOpen ? "true" : "false"} style={sideBySide ? { position: "sticky", top: 12 } : undefined}>
+          <div>
+            <button type="button" className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`} onClick={() => setTalkOpen((o) => !o)} aria-expanded={talkOpen} style={twirlStyle} data-talk-twirl>
+              Talk it through {talkOpen ? "▾" : "▸"}
+            </button>
+          </div>
+          {talkOpen && (
+            <>
           <div ref={talkFieldRef}>
             <Input
               type="textarea"
               name="talk"
               label="Talk it through"
+              hideLabel
               value={talk}
               onChange={(e) => onTalkChange(e.target.value)}
-              placeholder="What makes sense, what doesn't, how the pieces fit."
+              placeholder={state.brief ? TALK_PROMPT_WITH_BRIEF : TALK_PROMPT}
             />
           </div>
           {/* Thinking out loud is the point here, so it can be dictated.
               The letter itself never can (see DictateButton's header). */}
           <DictateIntoText target={{ letterFile: fileId }} value={talk} onChange={onTalkChange} fieldRef={talkFieldRef} />
           <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
-            In your own words, once, top to bottom. It goes into the project's record as yours, today, when you write the outline.
+            {TALK_HINT}
             {talkSaved ? ` · ${talkSaved}` : ""}
           </p>
           <div>
@@ -329,24 +364,26 @@ export function LetterBrief({
               disabled={busy || running || !talk.trim()}
               onClick={() => {
                 if (!window.confirm(OUTLINE_ASK)) return;
-                void post("talk", { text: talk, date: localDateString() });
+                void post("talk", { text: talk });
               }}
               data-outline-button
             >
               Write the outline
             </button>
           </div>
+            </>
+          )}
         </Stack>
       )}
       </Chain>
         );
       })()}
       {state.talk.sent && (
-        <Stack gap={1} data-letter-talk-sent>
+        <Stack gap={1} data-letter-talk-sent data-talk-on-record={state.talk.sent.onRecord ? "true" : "false"}>
           <span className={`${textSize.sm} ${sprinkles({ fontWeight: "semibold" })}`}>
             Talked through{" "}
             <span className={textSize.xs} style={{ color: semanticColors.textSubtle, fontWeight: "normal" }}>
-              · on the record {longDate(state.talk.sent.at)}, {state.talk.sent.byName}'s words
+              · {state.talk.sent.onRecord ? `on the record ${longDate(`${state.talk.sent.onRecord}T12:00:00`)}, ${state.talk.sent.byName}'s words` : `${state.talk.sent.byName}'s words. ${TALK_WAITS}`}
             </span>
           </span>
           <p className={textSize.sm} style={{ margin: 0, whiteSpace: "pre-wrap" }}>

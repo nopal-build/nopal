@@ -7,17 +7,27 @@
  * that nothing logged backs, and one thing for the client to go do.
  * `OUTLINE.md` is its skill, written from the attic test's three rounds.
  *
- * Who decides what. A person: the talk (typed on the letter's page, on
- * the record as their Card for the day when they ask for the outline),
- * the click, editing the outline, judging it. Code: the Card write
- * (`appendToCard`), the trigger, the one count and the one bounce, that
- * a topic line is cited or a position, that every citation is a node's
- * own, that Go do is last and one line, where the outline is kept and
- * who reads it. The model: the outline's words.
+ * Without a brief (Austin, 2026-11-05: the talk box and the outline are
+ * for anyone writing a letter, brief or no brief) the outline is made
+ * from the writer's talk-through and nothing else: no brief, no node, no
+ * list of people, no project skill. `outlineFromTalkText` is that call,
+ * and its input has no field a node or a brief could ride in on.
+ * `OUTLINE-TALK` is its skill, a default only.
+ *
+ * Who decides what. A person: the talk (typed on the letter's page), the
+ * click, editing the outline, judging it, and sending the letter, which
+ * is what puts the talk on the record (Austin, 2026-11-05: "you could
+ * talk it through and then decide that it's not important. Once you send
+ * the letter, that is kind of the distinction"). Code: the Card write at
+ * Send (`landTalkThrough`, through `appendToCard`), the trigger, the one
+ * count and the one bounce, that a topic line is cited or a position,
+ * that every citation is a node's own, that Go do is last and one line,
+ * that an outline made without a brief cites nothing, where the outline
+ * is kept and who reads it. The model: the outline's words.
  *
  * A second call on the brief's stage: same job name, model and effort,
  * `kind: "outline"` on the job. The outline never enters the graph; the
- * talk does, as the guide's words on that day, at the next run.
+ * talk does, as its speaker's words on the day the letter is sent.
  */
 
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
@@ -34,7 +44,6 @@ import { runDailyLogSync } from "./dailyLogSync.server";
 import { countPageWords } from "./effortReadings.server";
 import { groupOf, type Feature } from "./features";
 import { getEffectiveGraphLogDefaultSkill } from "./graphLogDefaults.server";
-import { markDate } from "./graphLogMarks.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { enqueueGraphLogJob, GraphLogCancelledError, throwIfGraphLogCancelled } from "./graphLogQueue.server";
 import { countCitations, loadGraphNodes } from "./graphProjectView.server";
@@ -45,7 +54,7 @@ import { letterHome, letterTitle } from "./letters.server";
 import type { LlmProvider, ToolDefinition } from "./llmProvider";
 import { splitFrontmatter, splitReadmeSections } from "./project.types";
 import { composeStageSkill, findProjectGraphFolder, getProjectStageSkill, isSkipInstruction, listExtraSkillFiles } from "./projectN02.server";
-import { getProjectSharing } from "./projectSharing.server";
+import { getProjectRole, getProjectSharing } from "./projectSharing.server";
 import { findSeedSyncFolder, parseSeedPeople, SEED_PEOPLE_FILE_NAME } from "./seed.server";
 import { getFileRefById, listFolderChildren } from "./vault.server";
 import type { FileRef, VaultFolder } from "./vault.types";
@@ -75,10 +84,12 @@ export function outlineHeadingKey(heading: string): string {
 
 export type OutlineSection = { heading: string; key: string; markdown: string };
 
-/** The document read into topics and the tail. Pure. */
-export function parseOutlineDocument(markdown: string): { topics: OutlineSection[]; tail: Map<string, OutlineSection>; order: string[] } {
+/** The document read into topics and the tail. `tail` is the headings
+ * read as the tail: the fixed three, or none for an outline made without
+ * a brief, where every section is a topic. Pure. */
+export function parseOutlineDocument(markdown: string, tailOf: readonly { key: string }[] = OUTLINE_TAIL): { topics: OutlineSection[]; tail: Map<string, OutlineSection>; order: string[] } {
   const body = splitFrontmatter(markdown).body;
-  const tailKeys = new Set<string>(OUTLINE_TAIL.map((t) => t.key));
+  const tailKeys = new Set<string>(tailOf.map((t) => t.key));
   const topics: OutlineSection[] = [];
   const tail = new Map<string, OutlineSection>();
   const order: string[] = [];
@@ -265,6 +276,105 @@ export async function outlineText(input: OutlineTextInput): Promise<OutlineTextR
   };
 }
 
+// ─── Without a brief: the talk and nothing else ─────────────────────────
+
+/**
+ * Everything code has to say about one write of an outline made without
+ * a brief. Hard sends it back once: no topics; a citation (there is no
+ * node behind this outline to cite); a heading from the brief's tail
+ * (there is no brief to have skipped, no graph to be missing from, and
+ * Go do is a guide's line to a client); the whole over its budget.
+ */
+export function talkOutlineWriteNotes(markdown: string): WriteNotes & { words: number } {
+  const hard: string[] = [];
+  const parsed = parseOutlineDocument(markdown, []);
+  if (parsed.topics.length === 0) hard.push("no topic section: the outline is the writer's topics, in the order they took them");
+  const tailKeys = new Set<string>(OUTLINE_TAIL.map((t) => t.key));
+  for (const topic of parsed.topics) {
+    if (tailKeys.has(topic.key)) hard.push(`"${topic.heading}" does not belong here: this outline has only the talk behind it, no brief and no graph`);
+  }
+  if (/:ref\{/.test(markdown)) hard.push("a citation: this outline cites nothing, because it was given nothing to cite");
+  const words = countPageWords(markdown);
+  if (words > OUTLINE_WORD_BUDGET) hard.push(`${words} words against a budget of ${OUTLINE_WORD_BUDGET}`);
+  return { hard, soft: [], words };
+}
+
+export const TALK_OUTLINE_TOOL: ToolDefinition = {
+  name: "write_outline",
+  description:
+    "The whole outline, once: the writer's topics in the order they took them, and nothing after. Code reads it and may send it back once; send it again whole, and the resend is accepted as written.",
+  inputSchema: {
+    type: "object",
+    properties: { markdown: { type: "string", description: "The outline as a markdown document." } },
+    required: ["markdown"],
+  },
+};
+
+/** What the call is given. No brief, no node, no people, no purpose: the
+ * type has nowhere to put them. */
+export type TalkOutlineTextInput = {
+  letterTitle: string;
+  today: string;
+  writerName: string;
+  talk: string;
+  skill: string;
+  provider?: LlmProvider;
+  log?: (line: string) => void;
+  checkCancelled?: () => Promise<void>;
+};
+
+export function buildTalkOutlineSystemPrompt(skill: string, input: Pick<TalkOutlineTextInput, "letterTitle" | "today" | "writerName" | "talk">): string {
+  return [
+    "You are GraphLog's outline step, turning what someone said out loud before writing a letter into the outline they write it from, per the instructions below. You work only through the tool: write_outline, the whole outline in one call. You are given their talk-through and nothing else. Write nothing outside the tool call.",
+    "",
+    skill,
+    "",
+    "---",
+    "",
+    `Today's actual date: ${input.today}`,
+    "",
+    `The letter: "${input.letterTitle}".`,
+    `The person writing it, whose talk this is: ${input.writerName}.`,
+    "",
+    `The talk-through, ${input.writerName}'s words, unedited:`,
+    "",
+    input.talk.trim(),
+  ].join("\n");
+}
+
+/** The model's half without a brief: the talk in, an outline out. No
+ * database, and nothing from the graph. */
+export async function outlineFromTalkText(input: TalkOutlineTextInput): Promise<OutlineTextResult> {
+  const provider = input.provider ?? AnthropicProvider.forStage("brief");
+  const result = await writeWholeDocument({
+    provider,
+    system: buildTalkOutlineSystemPrompt(input.skill, input),
+    firstMessage: `Write the outline for the letter "${input.letterTitle}" from ${input.writerName}'s talk-through, whole, in one write_outline call.`,
+    tool: TALK_OUTLINE_TOOL,
+    what: "outline",
+    maxTokens: BRIEF_MAX_OUTPUT_TOKENS,
+    log: input.log,
+    checkCancelled: input.checkCancelled,
+    notes: (markdown) => {
+      const { hard, soft } = talkOutlineWriteNotes(markdown);
+      return { hard, soft };
+    },
+  });
+  const parsed = result.markdown ? parseOutlineDocument(result.markdown, []) : { topics: [], tail: new Map<string, OutlineSection>(), order: [] };
+  const content = assembleOutline(parsed);
+  return {
+    content,
+    topics: parsed.topics.map((t) => t.heading),
+    bounced: result.bouncedWith,
+    unmatched: [],
+    words: countPageWords(content),
+    incomplete: result.incomplete,
+    usage: result.usage,
+    model: result.model,
+    turns: result.turns,
+  };
+}
+
 // ─── The stage ──────────────────────────────────────────────────────────
 
 export type OutlineRunResult = { ok: true; topics: string[]; bounced: string[]; unmatched: string[]; words: number; incomplete: string[] } | { ok: false; error: string };
@@ -296,10 +406,10 @@ async function peopleLinesFor(projectFolder: VaultFolder): Promise<string[]> {
 }
 
 /**
- * Writes one letter's outline from the talk-through on its row and the
- * brief beside it, and keeps it. First copies the talk's day into the
- * project (`runDailyLogSync`), as a taken suggestion does, so the next
- * run finds it. Asked for by a guide; never by the pipeline.
+ * Writes one letter's outline from the talk-through on its row, and from
+ * the brief beside it when the letter has one. With no brief the graph
+ * is never opened: the call is the talk alone (`outlineFromTalkText`).
+ * Asked for by whoever is writing the letter; never by the pipeline.
  */
 export async function runOutline(projectFolder: VaultFolder, letterFileId: string, actingHumanId: string, opts: RunOutlineOptions = {}): Promise<OutlineRunResult> {
   const log = opts.log ?? (() => {});
@@ -310,49 +420,42 @@ export async function runOutline(projectFolder: VaultFolder, letterFileId: strin
   const home = file && !file.archived_at ? await letterHome(file) : null;
   if (!file || !home || home.project._id !== projectFolder._id) return { ok: false, error: "That letter is not on this project" };
   const row = await getLetterBriefRow(letterFileId);
-  if (!row?.content) return { ok: false, error: "This letter has no brief yet. Read the brief first." };
-  if (!row.talk_through?.trim()) return { ok: false, error: "Nothing has been talked through yet." };
+  if (!row?.talk_through?.trim()) return { ok: false, error: "Nothing has been talked through yet." };
   const title = letterTitle(file);
-
-  if (row.talk_through_date) {
-    try {
-      await runDailyLogSync(projectFolder._id, { date: row.talk_through_date });
-    } catch (err) {
-      log(`outline: the talk's day could not be copied into the project (${err instanceof Error ? err.message : String(err)}); the next run will.`);
-    }
-  }
+  const talk = row.talk_through;
 
   const ownSkill = await getProjectStageSkill(projectFolder, "OUTLINE.md");
   if (ownSkill !== null && isSkipInstruction(ownSkill)) return { ok: false, error: "skills/OUTLINE.md says skip, so no outline was written" };
-  const stageSkill = ownSkill ?? (await getEffectiveGraphLogDefaultSkill("outline"));
-  const { content: skill } = composeStageSkill(stageSkill, await getProjectStageSkill(projectFolder, "SKILL.md"), await listExtraSkillFiles(projectFolder));
-
-  const graphFolder = await findProjectGraphFolder(projectFolder);
-  if (!graphFolder) return { ok: false, error: "This project has no graph yet." };
-  const { files } = await listFolderChildren(projectFolder.human_id, graphFolder._id);
-  const { allNodes, issues } = await loadGraphNodes(files);
-  for (const issue of issues) log(`outline: ${issue}.`);
-  const nodes = [...allNodes].sort((a, b) => a.date.localeCompare(b.date) || a.number - b.number);
-  const guide = (await getHumansById([row.talk_through_by_human_id ?? actingHumanId]))[0];
-  const guideName = guide ? firstName(guide) : "the guide";
+  const writer = (await getHumansById([row.talk_through_by_human_id ?? actingHumanId]))[0];
   const today = new Date().toISOString().slice(0, 10);
-  log(`outline: writing the outline for "${title}" from ${guideName}'s talk-through and ${nodes.length} node(s).`);
+  const checkCancelled = () => throwIfGraphLogCancelled(projectFolder._id);
+
+  let write: () => Promise<OutlineTextResult>;
+  if (!row.content) {
+    // No brief: the talk and nothing else. The default skill alone, so
+    // nothing a project keeps in `skills/` rides along either.
+    const skill = await getEffectiveGraphLogDefaultSkill("outlineTalk");
+    const writerName = writer ? firstName(writer) : "the writer";
+    log(`outline: writing the outline for "${title}" from ${writerName}'s talk-through alone (no brief, nothing from the graph).`);
+    write = () => outlineFromTalkText({ letterTitle: title, today, writerName, talk, skill, provider: opts.provider, log, checkCancelled });
+  } else {
+    const brief = row.content;
+    const stageSkill = ownSkill ?? (await getEffectiveGraphLogDefaultSkill("outline"));
+    const { content: skill } = composeStageSkill(stageSkill, await getProjectStageSkill(projectFolder, "SKILL.md"), await listExtraSkillFiles(projectFolder));
+    const graphFolder = await findProjectGraphFolder(projectFolder);
+    if (!graphFolder) return { ok: false, error: "This project has no graph yet." };
+    const { files } = await listFolderChildren(projectFolder.human_id, graphFolder._id);
+    const { allNodes, issues } = await loadGraphNodes(files);
+    for (const issue of issues) log(`outline: ${issue}.`);
+    const nodes = [...allNodes].sort((a, b) => a.date.localeCompare(b.date) || a.number - b.number);
+    const guideName = writer ? firstName(writer) : "the guide";
+    const peopleLines = await peopleLinesFor(projectFolder);
+    log(`outline: writing the outline for "${title}" from ${guideName}'s talk-through and ${nodes.length} node(s).`);
+    write = () => outlineText({ letterTitle: title, purpose: file.purpose?.trim() ?? "", today, guideName, brief, talk, peopleLines, nodes, skill, provider: opts.provider, log, checkCancelled });
+  }
 
   try {
-    const result = await outlineText({
-      letterTitle: title,
-      purpose: file.purpose?.trim() ?? "",
-      today,
-      guideName,
-      brief: row.content,
-      talk: row.talk_through,
-      peopleLines: await peopleLinesFor(projectFolder),
-      nodes,
-      skill,
-      provider: opts.provider,
-      log,
-      checkCancelled: () => throwIfGraphLogCancelled(projectFolder._id),
-    });
+    const result = await write();
     await recordGraphLogUsage({
       runId: opts.runId,
       humanId: actingHumanId,
@@ -377,7 +480,7 @@ export async function runOutline(projectFolder: VaultFolder, letterFileId: strin
       outline_edited_at: null,
       outline_pending_job_id: null,
     });
-    log(`outline: "${title}": ${result.topics.length} topic(s), ${result.words} words, ${result.bounced.length ? "sent back once" : "written first time"}, ${result.unmatched.length} citation(s) matching no node, ${result.turns} turn(s)${result.incomplete.length ? `; not finished: ${result.incomplete.join("; ")}` : ""}.`);
+    log(`outline: "${title}": ${result.topics.length} topic(s), ${result.words} words, ${result.bounced.length ? "sent back once" : "written first time"}, ${result.unmatched.length} citation(s) matching no node, ${result.turns} turn(s), ${result.usage.inputTokens} token(s) in and ${result.usage.outputTokens} out${result.incomplete.length ? `; not finished: ${result.incomplete.join("; ")}` : ""}.`);
     return { ok: true, topics: result.topics, bounced: result.bounced, unmatched: result.unmatched, words: result.words, incomplete: result.incomplete };
   } catch (err) {
     if (err instanceof GraphLogCancelledError) throw err;
@@ -386,34 +489,33 @@ export async function runOutline(projectFolder: VaultFolder, letterFileId: strin
   }
 }
 
-// ─── The guide's side: the talk, the outline asked for, the outline edited ──
+// ─── The writer's side: the talk, the outline asked for, the outline edited ──
 
 export type TalkResult = { ok: true; jobId: string } | { ok: false; status: 400 | 403 | 409; error: string };
 
-/** Autosave of what the guide has typed and not yet put on the record. */
+/** Autosave of what the writer has typed and not yet handed over. */
 export async function saveTalkDraft(projectFolder: VaultFolder, letter: FileRef, draft: string): Promise<void> {
   await writeLetterBriefRow(letter._id, { letter_file_id: letter._id, project_folder_id: projectFolder._id, talk_draft: draft });
 }
 
 /**
- * The guide's click: their talk goes onto their Card for today on the
- * project (`appendToCard`, the daily log's own rules) and the outline is
- * asked for. One talk per letter; asking again is `requestOutline`.
+ * The writer's click: their talk is kept on the letter's row and the
+ * outline is asked for, with or without a brief. Nothing goes onto a
+ * Card here: the talk waits for the letter to be sent (`landTalkThrough`).
+ * Someone who could not put it on the record then is told now. One talk
+ * per letter; asking again is `requestOutline`.
  */
 export async function sendTalkThrough(
   projectFolder: VaultFolder,
   letter: FileRef,
   actor: { humanId: string; features: readonly Feature[] },
-  input: { text: string; date?: string },
+  input: { text: string },
 ): Promise<TalkResult> {
   const text = input.text.trim();
   if (!text) return { ok: false, status: 400, error: "Say something first." };
   const row = await getLetterBriefRow(letter._id);
-  if (!row?.content) return { ok: false, status: 400, error: "Read the brief first." };
-  if (await jobIsRunning(row.outline_pending_job_id)) return { ok: false, status: 409, error: "The outline is being written. Give it a few minutes." };
+  if (await jobIsRunning(row?.outline_pending_job_id)) return { ok: false, status: 409, error: "The outline is being written. Give it a few minutes." };
   if (!actor.features.includes("dailyLog")) return { ok: false, status: 403, error: "You're not on this project's log, so your talk-through can't go on its record." };
-  const date = markDate(input.date);
-  const card = await appendToCard({ humanId: actor.humanId, date, projectFolderId: projectFolder._id, text, features: actor.features });
   const jobId = await enqueueGraphLogJob("brief", { actingHumanId: actor.humanId, projectFolderId: projectFolder._id, fileId: letter._id, kind: "outline" });
   await writeLetterBriefRow(letter._id, {
     letter_file_id: letter._id,
@@ -422,18 +524,50 @@ export async function sendTalkThrough(
     talk_through: text,
     talk_through_at: new Date().toISOString(),
     talk_through_by_human_id: actor.humanId,
-    talk_through_date: date,
-    talk_through_card_file_id: card.fileId,
+    // Set when it lands, at Send: the day it went on the record, and the Card.
+    talk_through_date: null,
+    talk_through_card_file_id: null,
     outline_pending_job_id: jobId,
   });
   return { ok: true, jobId };
 }
 
+/** Whether a letter has a talk-through still waiting for Send. */
+export function talkIsWaiting(row: { talk_through?: string | null; talk_through_card_file_id?: string | null } | null | undefined): boolean {
+  return !!row?.talk_through?.trim() && !row.talk_through_card_file_id;
+}
+
+/**
+ * The letter was sent, so its talk-through goes on the record: onto its
+ * speaker's Card for the send day on this project, as their words
+ * (`appendToCard`, the daily log's own rules, read for the speaker and
+ * not for whoever sent), and that day is copied into the project the way
+ * a taken suggestion is, so the next run finds it. Once: a talk that
+ * already has its Card (every one given before 2026-11-05 landed when it
+ * was given) is left alone, and so is a send again. Called by
+ * `sendLetter` and by nothing else.
+ */
+export async function landTalkThrough(projectFolder: VaultFolder, letterFileId: string, date: string): Promise<{ landed: boolean }> {
+  const row = await getLetterBriefRow(letterFileId);
+  if (!row || !talkIsWaiting(row) || !row.talk_through_by_human_id) return { landed: false };
+  const speaker = row.talk_through_by_human_id;
+  const features = (await getProjectRole(projectFolder, speaker))?.features ?? [];
+  // No longer on the project's log: their words stay on the letter's row.
+  if (!features.includes("dailyLog")) return { landed: false };
+  const card = await appendToCard({ humanId: speaker, date, projectFolderId: projectFolder._id, text: row.talk_through!.trim(), features });
+  await writeLetterBriefRow(letterFileId, { letter_file_id: letterFileId, project_folder_id: projectFolder._id, talk_through_date: date, talk_through_card_file_id: card.fileId });
+  try {
+    await runDailyLogSync(projectFolder._id, { date });
+  } catch {
+    // The next run copies the day.
+  }
+  return { landed: true };
+}
+
 /** "Write it again": the same talk, a new outline. */
 export async function requestOutline(projectFolder: VaultFolder, letter: FileRef, actingHumanId: string): Promise<TalkResult> {
   const row = await getLetterBriefRow(letter._id);
-  if (!row?.content) return { ok: false, status: 400, error: "Read the brief first." };
-  if (!row.talk_through?.trim()) return { ok: false, status: 400, error: "Talk it through first." };
+  if (!row?.talk_through?.trim()) return { ok: false, status: 400, error: "Talk it through first." };
   if (await jobIsRunning(row.outline_pending_job_id)) return { ok: false, status: 409, error: "The outline is being written. Give it a few minutes." };
   const jobId = await enqueueGraphLogJob("brief", { actingHumanId, projectFolderId: projectFolder._id, fileId: letter._id, kind: "outline" });
   await writeLetterBriefRow(letter._id, { letter_file_id: letter._id, project_folder_id: projectFolder._id, outline_pending_job_id: jobId });

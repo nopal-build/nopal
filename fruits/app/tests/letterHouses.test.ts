@@ -231,6 +231,8 @@ vi.mock("robustness-core/data/generic.server", async (importOriginal) => {
 });
 vi.mock("robustness-core/data/letterSync.server", () => ({ syncLettersProjection: vi.fn(async () => ({ written: 0 })) }));
 vi.mock("robustness-core/data/letterPdf.server", () => ({ enqueueLetterPdfIfSent: vi.fn(async () => undefined) }));
+// The talk-through landing at Send has its own tests (`letterTalk.test.ts`).
+vi.mock("robustness-core/data/outline.server", () => ({ landTalkThrough: vi.fn(async () => ({ landed: false })) }));
 
 const { sendLetter, letterSendStateFor } = await import("robustness-core/data/letterSend.server");
 const { flaggedLetterIds, lowerLetterFlag } = await import("robustness-core/data/letterFlags.server");

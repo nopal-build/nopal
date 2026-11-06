@@ -9,10 +9,16 @@
  * when the PDF is remade if the public link is on. The link itself is a
  * second switch (`setLetterShared`), only on a sent letter.
  *
+ * Sending is also what puts the talk-through on the record (Austin,
+ * 2026-11-05: "Once you send the letter, that is kind of the
+ * distinction, that this is something that matters"): what the writer
+ * said before writing waits on the letter's row until now, then goes
+ * onto its speaker's Card for the send day (`landTalkThrough`).
+ *
  * Who decides what. A person: writing, sending, sending again, which
  * house a guide's letter goes to, the link. Code: the copy and its hash,
  * the day, who it is from and its houses, the flags, the projection, the
- * PDF's key. The model: nothing here.
+ * talk-through's Card, the PDF's key. The model: nothing here.
  */
 
 import { merge } from "./generic.server";
@@ -22,6 +28,7 @@ import { flagRecipients, houseAtSend, housesOf, sendAsksForHouse, type House } f
 import { houseMembers, houseOfActor } from "./letterHouses.server";
 import { enqueueLetterPdfIfSent } from "./letterPdf.server";
 import { syncLettersProjection } from "./letterSync.server";
+import { landTalkThrough } from "./outline.server";
 import { canManageLetters, contentFingerprint, isMarkdownFileName, letterEditedSinceSent, letterHome, letterSendRefusal, sentCopyOf, type LetterRefusal } from "./letters.server";
 import { getProjectRole } from "./projectSharing.server";
 import type { Human } from "./humans.server";
@@ -85,6 +92,14 @@ export async function sendLetter(actor: Pick<Human, "_id" | "role">, file: FileR
     at: sentAt,
   });
   await syncLettersProjection(home.project);
+  // What was said toward this letter goes on the record with it, as its
+  // speaker's words, once. The letter is sent whatever happens here: a
+  // talk that could not land is still waiting and lands at the next send.
+  try {
+    await landTalkThrough(home.project, file._id, sent.sent_date);
+  } catch (err) {
+    console.error(`[letters] the talk-through for letter ${file._id} did not go on the record at Send:`, err);
+  }
   // The PDF is of the sent copy, made when the link is on and after each
   // send while it is (`letterPdf.server.ts`).
   await enqueueLetterPdfIfSent(after);
