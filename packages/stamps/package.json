@@ -48,7 +48,11 @@
     "./Grid": "./src/Grid.tsx",
     "./useScrollSpy": "./src/useScrollSpy.ts",
     "./useStickyPaneMaxHeight": "./src/useStickyPaneMaxHeight.ts",
-    "./WebsitePageContent": "./src/WebsitePageContent.tsx"
+    "./WebsitePageContent": "./src/WebsitePageContent.tsx",
+    "./Stepper": "./src/Stepper.tsx",
+    "./stepper.css": "./src/stepper.css.ts",
+    "./MiniCalendar": "./src/MiniCalendar.tsx",
+    "./miniCalendar.css": "./src/miniCalendar.css.ts"
   },
   "peerDependencies": {
     "react": "^18.3.1"

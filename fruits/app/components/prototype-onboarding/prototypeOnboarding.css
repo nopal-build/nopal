@@ -1,0 +1,138 @@
+/* Client-facing onboarding funnel prototype (garden/1-seeds/
+   project-map.md's "Next step") — a real-UI pass, deliberately with NO
+   annotation styling (no red/handwritten anything): unlike the sibling
+   project-map-mockup, this is meant to read as real product, not a
+   reviewed exploration. Plain CSS on stamps' semantic variables, same
+   pattern as projectMapMockup.css. */
+
+/* proto-steps / proto-backlink retired (2026-11-02): replaced by the
+   real stamps/Stepper component and stamps' own `link` recipe (see
+   prototype-onboarding/shared.tsx's `FUNNEL_STEPS` + `BackLink`). */
+
+/* --- /guides stand-in --- */
+.proto-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+.proto-plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  height: 100%;
+}
+.proto-plan-card__bullets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.proto-plan-card__bullets li { font-size: 0.82rem; color: var(--color-text-subtle); padding-left: 14px; position: relative; }
+.proto-plan-card__bullets li::before { content: "\2022"; position: absolute; left: 0; color: var(--color-text-brand); }
+
+/* --- Scheduling: one box, planner list on the left, a small calendar
+   off to the right as a secondary way to jump to a date (Gerald,
+   2026-11-02: "the calendar is too big... small and to the right of
+   the times... can all live in the same box"). Calendar drops below
+   the planner on narrow screens. --- */
+.proto-schedule-box {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+.proto-schedule-box__planner { flex: 1; min-width: 0; }
+.proto-schedule-box__calendar { flex: 0 0 auto; width: 190px; }
+@media (max-width: 560px) {
+  .proto-schedule-box { flex-direction: column; }
+  .proto-schedule-box__calendar { width: 100%; max-width: 240px; }
+}
+
+.proto-time-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* proto-calendar retired (2026-11-02): replaced by the real
+   stamps/MiniCalendar component. */
+
+.proto-planner { display: flex; flex-direction: column; gap: 14px; max-height: 360px; overflow-y: auto; padding-right: 2px; }
+.proto-planner__day { padding: 6px 8px; border-radius: 8px; border: 1px solid transparent; }
+.proto-planner__day--selected { border-color: var(--color-text-brand); background: var(--color-surface-inset); }
+.proto-planner__day-heading { font-size: 0.85rem; font-weight: 600; margin: 0 0 6px; }
+
+/* --- Hold / loader --- */
+.proto-hold {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 48px 20px;
+  text-align: center;
+}
+.proto-hold-spinner {
+  width: 40px;
+  height: 40px;
+  border-radius: 9999px;
+  border: 3px solid var(--color-surface-border);
+  border-top-color: var(--color-text-brand);
+  animation: proto-spin 0.9s linear infinite;
+}
+@keyframes proto-spin { to { transform: rotate(360deg); } }
+.proto-hold-phases { display: flex; flex-direction: column; gap: 6px; }
+.proto-hold-phase { font-size: 0.85rem; color: var(--color-text-subtle); }
+.proto-hold-phase--current { color: var(--color-text-primary); font-weight: 700; }
+.proto-hold-phase--done { color: var(--green); }
+
+/* --- Project Seed --- */
+.proto-eyebrow {
+  font-family: ui-monospace, SFMono-Regular, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--color-text-subtle);
+  margin: 0 0 2px;
+}
+.proto-stat { display: flex; flex-direction: column; gap: 2px; }
+.proto-stat__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-subtle);
+}
+.proto-stat__value { font-size: 0.92rem; font-weight: 600; }
+
+.proto-guest-banner {
+  border: 1px solid var(--color-surface-border);
+  background: var(--color-surface-inset);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  color: var(--color-text-subtle);
+}
+/* The checked/unchecked box itself is the real stamps/Checkbox
+   component now (presentational mode, 2026-11-02) — this just lays out
+   the row around it. */
+.proto-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.proto-checklist li { display: flex; gap: 8px; align-items: flex-start; }
+
+.proto-note-editor {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-field-border);
+  background: var(--color-field-bg);
+  color: var(--color-field-text);
+  resize: vertical;
+  min-height: 90px;
+  width: 100%;
+}
+.proto-file-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.proto-file-list li { font-size: 0.85rem; color: var(--color-text-subtle); }
+
+.proto-code-box {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.proto-next-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.proto-next-steps li { font-size: 0.88rem; color: var(--color-text-subtle); padding-left: 16px; position: relative; }
+.proto-next-steps li::before { content: "\2022"; position: absolute; left: 0; color: var(--color-text-brand); }

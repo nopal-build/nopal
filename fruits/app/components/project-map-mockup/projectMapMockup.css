@@ -1,0 +1,405 @@
+/* Project Map mockup (garden/1-seeds/project-map.md) — throwaway visual
+   exploration, not a design-system candidate yet. Plain CSS on stamps'
+   semantic variables, same pattern as cardTabs.css, so dark mode follows
+   for free without a bespoke @media block here. */
+
+.pm-banner {
+  border: 1px dashed var(--yellow);
+  background: var(--yellow-light);
+  color: var(--purple);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+/* A persistent two-column page (Gerald, 2026-10-28): LEFT is only ever
+   the simulated product; RIGHT is the Map Timeline, sticky, visible only
+   once Basecamp exists (the Project Map view). Our own reviewer chrome
+   -- "Viewing as", the lifecycle scrubber, the running notes -- lives
+   separately now, in a fixed bottom-right floating panel (see below),
+   not in this grid at all. Stacks to one column under 900px; the
+   timeline column itself hides on mobile in favor of a button + a
+   full-screen takeover (`.pm-mobile-timeline-overlay`). */
+.pm-page {
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, 320px);
+  gap: 32px;
+  align-items: start;
+}
+.pm-page__main {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+.pm-timeline-column {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+.pm-timeline-mobile-btn { display: none; }
+.pm-mobile-timeline-overlay { display: none; }
+@media (max-width: 900px) {
+  .pm-page { grid-template-columns: 1fr; }
+  .pm-timeline-desktop-only { display: none; }
+  .pm-timeline-mobile-btn { display: inline-flex; }
+  .pm-mobile-timeline-overlay {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: var(--color-surface-page);
+    padding: 20px 16px 32px;
+    overflow-y: auto;
+  }
+}
+
+/* The reviewer's floating panel -- "a fixed chat box type thing in the
+   bottom right that can be minimized" (Gerald, 2026-10-28). No chat
+   feature, just that much screen real estate: a fixed-size, fixed-
+   position panel, collapsible to just its header bar. */
+.pm-floating-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  width: min(380px, calc(100vw - 32px));
+  background: var(--color-surface-card);
+  border: 1px solid var(--color-surface-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pm-floating-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  text-align: left;
+}
+.pm-floating-panel--collapsed .pm-floating-panel__header { border-bottom: none; }
+.pm-floating-panel:not(.pm-floating-panel--collapsed) .pm-floating-panel__header { border-bottom: 1px solid var(--color-surface-border); }
+.pm-floating-panel__toggle {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: var(--color-surface-inset);
+  font-size: 1rem;
+  line-height: 1;
+}
+.pm-floating-panel__body {
+  padding: 4px 16px 16px;
+  overflow-y: auto;
+  max-height: min(70vh, 640px);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* A `<details>`: `.pm-flag__summary` is the one-line version, always
+   visible; `.pm-flag__body` (the full note) only shows once opened. A
+   sidebar of 9 of these read as a wall of handwriting before this — now
+   it's a scannable list that expands on demand. */
+.pm-flag {
+  border-left: 3px solid var(--red);
+  padding: 2px 0 2px 14px;
+  font-family: "Indie Flower", cursive;
+  color: var(--red);
+}
+@media (prefers-color-scheme: dark) {
+  .pm-flag { border-left-color: var(--red-light); color: var(--red-light); }
+}
+.pm-flag__summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1.3;
+  list-style: "\25b8  ";
+}
+.pm-flag[open] > .pm-flag__summary { list-style: "\25be  "; }
+.pm-flag__summary::-webkit-details-marker { display: none; }
+.pm-flag__summary-text { flex: 1; }
+.pm-flag__body { margin: 6px 0 2px; font-size: 1.1rem; line-height: 1.3; }
+.pm-flag__tag {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--red);
+  color: var(--red);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+@media (prefers-color-scheme: dark) {
+  .pm-flag__tag { border-color: var(--red-light); color: var(--red-light); }
+}
+.pm-flag--finding .pm-flag__tag { background: var(--red); color: var(--white); border-color: var(--red); }
+@media (prefers-color-scheme: dark) {
+  .pm-flag--finding .pm-flag__tag { background: var(--red-light); color: var(--purple); border-color: var(--red-light); }
+}
+.pm-flag--decision .pm-flag__tag { background: var(--red-light); color: var(--red); border-color: var(--red-light); }
+
+.pm-side-divider {
+  border: none;
+  border-top: 1px solid var(--color-surface-border);
+  margin: 0;
+}
+
+/* A real in-product notice (not a mockup annotation, so deliberately NOT
+   the red/hand treatment) -- carries from "Start Project" through an
+   established project until marked paid. */
+.pm-payment-banner {
+  padding: 12px 16px;
+  border-color: var(--yellow);
+  background: var(--yellow-light);
+}
+
+.pm-empty {
+  padding: 36px 20px;
+  border-style: dashed;
+}
+
+.pm-note-editor {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-field-border);
+  background: var(--color-field-bg);
+  color: var(--color-field-text);
+  resize: vertical;
+  min-height: 90px;
+  width: 100%;
+}
+
+.pm-file-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.pm-file-list li { font-size: 0.85rem; color: var(--color-text-subtle); }
+
+.pm-phase-editable {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  border: 1px solid var(--color-surface-border);
+  background: var(--color-surface-card);
+  border-radius: 9999px;
+  padding: 4px 6px 4px 12px;
+}
+.pm-phase-editable button {
+  background: none;
+  border: none;
+  color: var(--color-text-subtle);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 9999px;
+}
+.pm-phase-editable button:hover { background: var(--color-surface-inset); color: var(--red); }
+
+.pm-eyebrow {
+  font-family: ui-monospace, SFMono-Regular, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--color-text-subtle);
+  margin: 0 0 2px;
+}
+
+.pm-basecamp {
+  padding: 20px;
+  border-width: 2px;
+}
+
+.pm-stat { display: flex; flex-direction: column; gap: 2px; }
+.pm-stat__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-subtle);
+}
+.pm-stat__value { font-size: 0.92rem; font-weight: 600; }
+
+.pm-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pm-checklist li { display: flex; gap: 8px; align-items: baseline; font-size: 0.88rem; }
+.pm-checklist .pm-check { color: var(--green); flex: 0 0 auto; }
+
+/* --- The Map Timeline (Gerald, 2026-10-28): a vertical spine from
+   Basecamp to the final goal, camp by camp, linear -- a side-quest
+   branches off and rejoins; a fork is the path itself shifting. Both
+   just attach near the camp they happened after, off to the side, never
+   touching the main vertical sequence. --- */
+.pm-timeline { display: flex; flex-direction: column; }
+.pm-timeline-row { display: flex; gap: 10px; }
+.pm-timeline-row__rail {
+  position: relative;
+  width: 20px;
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: center;
+}
+.pm-timeline-row__rail::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--color-surface-border);
+}
+.pm-timeline-row:first-child .pm-timeline-row__rail::before { top: 50%; }
+.pm-timeline-row:last-child .pm-timeline-row__rail::before { bottom: 50%; }
+.pm-timeline-dot {
+  position: relative;
+  z-index: 1;
+  margin-top: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--color-surface-card);
+  border: 2px solid var(--color-surface-border);
+}
+.pm-timeline-dot--done { border-color: var(--green); background: var(--green-light); }
+.pm-timeline-dot--focused { border-color: var(--purple); background: var(--purple); box-shadow: 0 0 0 3px var(--moon); }
+.pm-timeline-dot--upcoming { opacity: 0.6; }
+.pm-timeline-dot--anchor { border-style: dashed; border-color: var(--color-text-brand); }
+.pm-timeline-row__content {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 0 14px;
+  font-size: 0.85rem;
+  color: var(--color-text-subtle);
+  background: none;
+  border: none;
+  text-align: left;
+}
+.pm-timeline-row--anchor .pm-timeline-row__content { font-weight: 700; color: var(--color-text-brand); }
+.pm-timeline-row--done .pm-timeline-row__content { color: var(--color-text-primary); }
+.pm-timeline-row--focused .pm-timeline-row__content { color: var(--purple); font-weight: 700; }
+.pm-timeline-row__content--clickable { cursor: pointer; }
+.pm-timeline-row__content--clickable:hover { color: var(--purple); }
+.pm-timeline-row__content--selected { text-decoration: underline; text-underline-offset: 3px; }
+
+/* A side-quest or fork: indented off the spine, own short connector,
+   never part of the continuous vertical line. */
+.pm-timeline-branch {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 14px 20px;
+}
+.pm-timeline-branch__connector {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 2px;
+  margin-top: 10px;
+  background: var(--color-surface-border);
+}
+.pm-timeline-branch--fork .pm-timeline-branch__connector { background: var(--yellow); }
+.pm-timeline-branch__content {
+  flex: 1;
+  min-width: 0;
+  border: 1px dashed var(--color-surface-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.pm-timeline-branch--fork .pm-timeline-branch__content { border-color: var(--yellow); background: var(--yellow-light); }
+.pm-timeline-branch__tag {
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Monaco, "Andale Mono", "Ubuntu Mono", monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-subtle);
+  margin-bottom: 2px;
+}
+.pm-timeline-branch__name { display: block; font-size: 0.85rem; }
+.pm-timeline-branch__description { margin: 2px 0 0; font-size: 0.78rem; color: var(--color-text-subtle); }
+
+/* --- Camp detail --- */
+.pm-camp-detail { padding: 20px; }
+.pm-preview-banner {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--moon);
+  color: var(--purple);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  margin-bottom: 12px;
+}
+.pm-preview-banner button {
+  background: none;
+  border: 1px solid var(--purple);
+  color: var(--purple);
+  border-radius: 9999px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.pm-step-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-surface-border);
+  font-size: 0.9rem;
+}
+.pm-step-row:last-child { border-bottom: none; }
+.pm-step-row__box {
+  width: 18px; height: 18px; border-radius: 5px; flex: 0 0 auto;
+  border: 2px solid var(--color-surface-border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.7rem; color: var(--white);
+}
+.pm-step-row--done .pm-step-row__box { background: var(--green); border-color: var(--green); }
+.pm-step-row__label { flex: 1; }
+.pm-step-row--done .pm-step-row__label { color: var(--color-text-subtle); text-decoration: line-through; }
+
+.pm-content-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-surface-border);
+  font-size: 0.88rem;
+}
+.pm-content-row:last-child { border-bottom: none; }
+.pm-content-row__when { color: var(--color-text-subtle); font-size: 0.78rem; white-space: nowrap; }
+
+.pm-add-camp { padding: 18px; border-style: dashed; }
+.pm-field { display: flex; flex-direction: column; gap: 4px; }
+.pm-field label { font-size: 0.78rem; font-weight: 600; color: var(--color-text-subtle); }
+.pm-field textarea {
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--color-field-border);
+  background: var(--color-field-bg);
+  color: var(--color-field-text);
+  resize: vertical;
+  min-height: 56px;
+}
+
+
