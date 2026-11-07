@@ -71,6 +71,31 @@ export type Human = Data & {
   suspendedAt?: string;
   /** Who suspended this account, for the audit trail shown alongside it. */
   suspendedBy?: string;
+  /** IANA timezone (e.g. `"America/Phoenix"`) every `availability`
+   * start/end is interpreted in. `null`/absent until this Human first
+   * sets their own "professor's hours" (the Profile page's Availability
+   * section) — see `garden/3-growing/professors-hours-and-schedulers.md`. */
+  timezone?: string | null;
+  /** This Human's own recurring weekly "professor's hours" — when
+   * they're generally available for a meeting, at most one block per
+   * day (today's UI only ever writes one; a day with none is closed).
+   * `null`/absent/empty means "not yet set", not "never available".
+   * Not a booking/access gate by itself — nothing computes real
+   * bookable slots yet; a future scheduler reads this (and the
+   * Organization's own shared `holidays`, `organizations.server.ts`) to
+   * do that. One or more Humans' availability composed together is a
+   * `MeetingScheduler` (`organizations.server.ts`). */
+  availability?: AvailabilityBlock[] | null;
+};
+
+export const AVAILABILITY_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+export type AvailabilityDay = (typeof AVAILABILITY_DAYS)[number];
+
+export type AvailabilityBlock = {
+  day: AvailabilityDay;
+  /** 24-hour "HH:MM" clock time, in this Human's own `timezone`. */
+  start: string;
+  end: string;
 };
 
 export type Humans = Collection<Human>;
@@ -281,6 +306,53 @@ export async function updateHumanName(
 ): Promise<Human | undefined> {
   await merge("humans", id, { name: name.trim() });
   return getHumanById(id);
+}
+
+/** Replaces this Human's whole weekly `availability` ("professor's
+ * hours") and `timezone` together — the Profile page always writes both
+ * at once, since a block's "HH:MM" is meaningless without knowing which
+ * zone it's in. The one intended writer of either field. */
+export async function setHumanAvailability(
+  id: string,
+  availability: AvailabilityBlock[],
+  timezone: string,
+): Promise<Human | undefined> {
+  await merge("humans", id, { availability, timezone });
+  return getHumanById(id);
+}
+
+/** Whether `when` (defaults to now) falls inside this Human's own
+ * declared weekly availability ("professor's hours"). `null` when they
+ * haven't set any yet — nothing to check against, not "never
+ * available". Pure/timezone-aware (`Intl.DateTimeFormat`) so a caller
+ * can check many instants cheaply once it has the Human row; doesn't
+ * know about the Organization's own shared `holidays`
+ * (`organizations.server.ts`'s `isOrganizationHoliday`) — a caller
+ * wanting the full picture ANDs the two together. Nothing in this
+ * codebase calls this yet (see `garden/3-growing/
+ * professors-hours-and-schedulers.md`) — it exists so a future
+ * scheduling feature reads ONE correct implementation rather than
+ * re-deriving the day/time logic itself. */
+export function isWithinAvailability(
+  human: Pick<Human, "timezone" | "availability">,
+  when: Date = new Date(),
+): boolean | null {
+  const { timezone, availability } = human;
+  if (!timezone || !availability || availability.length === 0) return null;
+
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = fmt.formatToParts(when);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  const day = get("weekday") as AvailabilityDay;
+  const time = `${get("hour")}:${get("minute")}`;
+
+  return availability.some((block) => block.day === day && time >= block.start && time < block.end);
 }
 
 /**

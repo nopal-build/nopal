@@ -17,6 +17,7 @@ mod auth;
 mod garden;
 mod graphlog;
 mod image;
+mod org;
 mod perf;
 mod record;
 mod release_log;
@@ -183,6 +184,13 @@ enum Command {
     Perf {
         #[command(subcommand)]
         command: PerfCommand,
+    },
+    /// The Organization's observed holidays (the `/org` web page's own
+    /// data). Admin/Super, or a Guide on the Organization specifically,
+    /// login required.
+    Org {
+        #[command(subcommand)]
+        command: OrgCommand,
     },
     /// Reference docs for how to write things in Nopal (OxMarkdown syntax,
     /// the Vault, etc). Lists available skills by default.
@@ -850,6 +858,17 @@ enum GraphlogScheduleCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum OrgCommand {
+    /// Every observed holiday, each as its own date or a range.
+    Holidays {
+        /// Print the server's raw JSON response instead of a formatted
+        /// list -- the form an AI agent should actually consume.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum PerfCommand {
     /// High-level stats across every traced route: request count, avg/p95/
     /// max duration, error count, by-route breakdown. The same numbers the
@@ -1266,6 +1285,15 @@ fn main() {
                 PerfCommand::Summary { days, json } => perf::summary(days, json),
                 PerfCommand::Recent { limit, json } => perf::recent(limit, json),
                 PerfCommand::Show { request_id, json } => perf::show(&request_id, json),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Org { command } => {
+            let result = match command {
+                OrgCommand::Holidays { json } => org::holidays(json),
             };
             if let Err(e) = result {
                 eprintln!("{e}");

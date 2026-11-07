@@ -33,6 +33,43 @@ export type Organization = Data & {
    * DB-only (no reversal of this module's own Phase A decision); this is
    * just a pointer TO a vault folder, not the Organization living there. */
   kanban_folder_id?: string | null;
+  /** Specific dates this Organization observes and is closed for — org-
+   * wide, on top of whatever any individual Human's own "professor's
+   * hours" (`humans.server.ts`'s `availability`) otherwise say. (Office
+   * hours used to live here too, org-wide — superseded 2026-11-03: each
+   * Human now sets their own on their Profile page instead, see
+   * `garden/3-growing/professors-hours-and-schedulers.md`.) */
+  holidays?: OrganizationHoliday[] | null;
+  /** Named, multi-person meeting schedulers this Organization has set up
+   * — see `MeetingScheduler`'s own doc. `null`/absent/empty means none
+   * yet. */
+  schedulers?: MeetingScheduler[] | null;
+};
+
+export type OrganizationHoliday = {
+  /** "YYYY-MM-DD" (a plain calendar date, not tied to any one timezone)
+   * — the first (or only) day excluded. */
+  date: string;
+  /** "YYYY-MM-DD", inclusive — the last day of a multi-day holiday
+   * (e.g. a long weekend). `null`/absent/equal-to-`date` means a single
+   * day, same as before this field existed. */
+  endDate?: string | null;
+  name: string;
+};
+
+export type MeetingScheduler = {
+  /** Stable id (`newRecordId()`), since a scheduler's own `name` can
+   * change — what `remove-scheduler`/`add-scheduler-member`/
+   * `remove-scheduler-member` (`org.tsx`) key off of. */
+  id: string;
+  name: string;
+  /** Which Humans' own "professor's hours" (`humans.server.ts`'s
+   * `availability`) compose this scheduler — e.g. a "Potential Lead"
+   * scheduler naming Lucas and Austin, or a "Building" scheduler naming
+   * Gerald and Austin. Every Human already has an implicit scheduler of
+   * their own (just their own availability, shown on their own Profile)
+   * — this is specifically for a NAMED, multi-person one. */
+  humanIds: string[];
 };
 
 /** The one hard-coded Organization — see this module's own doc above. */
@@ -164,6 +201,40 @@ export async function setOrganizationKanbanFolderId(
   // REPLACE the whole record (wiping `name`/`created_at`), same pitfall
   // `merge`'s own precedent elsewhere in this codebase exists to avoid.
   const record = await merge("organizations", organizationId, { kanban_folder_id: folderId });
+  return record ? formatRecord(record as unknown as Organization) : undefined;
+}
+
+/** Replaces this Organization's whole `holidays` list — the Org page
+ * (`org.tsx`) reads the current list, adds/removes one, and writes the
+ * result back here. The one intended writer of this field. */
+export async function setOrganizationHolidays(
+  holidays: OrganizationHoliday[],
+  organizationId: string = NOPAL_ORGANIZATION_ID,
+): Promise<Organization | undefined> {
+  const record = await merge("organizations", organizationId, { holidays });
+  return record ? formatRecord(record as unknown as Organization) : undefined;
+}
+
+/** Whether `date` (an ISO "YYYY-MM-DD") falls on an observed holiday —
+ * pure, no DB call. Callers compare against whichever calendar day
+ * actually matters to them (e.g. a Human's own `timezone`, when checking
+ * their own availability against the org's shared holidays — holidays
+ * themselves carry no timezone of their own, see `OrganizationHoliday`'s
+ * own doc). */
+export function isOrganizationHoliday(organization: Pick<Organization, "holidays">, date: string): boolean {
+  return (organization.holidays ?? []).some((h) => date >= h.date && date <= (h.endDate || h.date));
+}
+
+/** Replaces this Organization's whole `schedulers` list — the Org page
+ * (`org.tsx`) reads the current list, adds/renames/removes one or
+ * changes its members, and writes the result back here, same
+ * "read, change in memory, write the whole array" shape
+ * `setOrganizationHolidays` uses. The one intended writer of this field. */
+export async function setOrganizationSchedulers(
+  schedulers: MeetingScheduler[],
+  organizationId: string = NOPAL_ORGANIZATION_ID,
+): Promise<Organization | undefined> {
+  const record = await merge("organizations", organizationId, { schedulers });
   return record ? formatRecord(record as unknown as Organization) : undefined;
 }
 

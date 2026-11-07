@@ -31,6 +31,10 @@ import {
   recordFailedEmailCodeAttempt,
   applyPendingEmailChange,
   removeAliasEmail,
+  setHumanAvailability,
+  AVAILABILITY_DAYS,
+  type AvailabilityBlock,
+  type AvailabilityDay,
   type Human,
   type Role,
 } from "robustness-core/data/humans.server";
@@ -73,8 +77,11 @@ import { useHome } from "../hooks/useUser";
 import { displayName } from "robustness-core/data/humanNames";
 import { Input } from "stamps/Input";
 import { Badge } from "stamps/Badge";
+import { Checkbox } from "stamps/Checkbox";
 import { Modal } from "stamps/Modal";
 import { MoreMenu } from "stamps/MoreMenu";
+import { Select, type SelectOption } from "stamps/Select";
+import { button } from "stamps/button.css";
 import { surfaceBase } from "stamps/surface.css";
 import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
@@ -142,6 +149,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
     inviteExpired,
     revokedRelationships,
     organizationName: organization?.name ?? null,
+    availabilityTimezone: user.timezone ?? "America/Chicago",
+    availabilityRows: computeAvailabilityRows(user.availability),
   };
 }
 
@@ -170,6 +179,51 @@ async function handleUpdateName(request: Request, form: FormData) {
   const setCookie = await updateUserSession(request, updated);
   return data(
     { intent: "update-name" as const, success: true, human: updated },
+    { headers: { "Set-Cookie": setCookie } },
+  );
+}
+
+/** Saves this Human's own weekly "professor's hours" (`availability`)
+ * and `timezone` together — see `humans.server.ts`'s own doc on why
+ * those two travel as one write. Refreshes the session cookie
+ * (`updateUserSession`) same as `handleUpdateName`, since `getUser`
+ * reads the CACHED Human off the session, not a fresh DB row. */
+async function handleUpdateAvailability(request: Request, form: FormData) {
+  const user = await getUser(request);
+  if (!user) return redirect("/login");
+
+  const timezone = String(form.get("timezone") ?? "").trim();
+  if (!timezone) {
+    return data(
+      { intent: "update-availability" as const, error: "Pick a timezone." },
+      { status: 400 },
+    );
+  }
+  const availability: AvailabilityBlock[] = [];
+  for (const day of AVAILABILITY_DAYS) {
+    if (form.get(`open-${day}`) !== "on") continue;
+    const start = String(form.get(`start-${day}`) ?? "");
+    const end = String(form.get(`end-${day}`) ?? "");
+    if (!start || !end) continue;
+    if (start >= end) {
+      return data(
+        { intent: "update-availability" as const, error: `${day}: closing time must be after opening time` },
+        { status: 400 },
+      );
+    }
+    availability.push({ day, start, end });
+  }
+
+  const updated = await setHumanAvailability(user._id, availability, timezone);
+  if (!updated) {
+    return data(
+      { intent: "update-availability" as const, error: "Failed to save." },
+      { status: 500 },
+    );
+  }
+  const setCookie = await updateUserSession(request, updated);
+  return data(
+    { intent: "update-availability" as const, success: true, human: updated },
     { headers: { "Set-Cookie": setCookie } },
   );
 }
@@ -860,6 +914,9 @@ export async function action({ request }: ActionFunctionArgs) {
   }
   if (intent === "remove-alias") {
     return handleRemoveAlias(request, form);
+  }
+  if (intent === "update-availability") {
+    return handleUpdateAvailability(request, form);
   }
   return handleUpdateName(request, form);
 }
@@ -1556,8 +1613,153 @@ function ApiTokenCard({ token }: { token: ApiToken }) {
   );
 }
 
+const AVAILABILITY_DAY_LABELS: Record<AvailabilityDay, string> = {
+  Mon: "Monday",
+  Tue: "Tuesday",
+  Wed: "Wednesday",
+  Thu: "Thursday",
+  Fri: "Friday",
+  Sat: "Saturday",
+  Sun: "Sunday",
+};
+
+// A starter list of common IANA zones, not exhaustive — good enough to
+// start setting "professor's hours" with; easy to extend later.
+const AVAILABILITY_TIMEZONE_OPTIONS: SelectOption[] = [
+  { value: "America/New_York", label: "Eastern — New York" },
+  { value: "America/Chicago", label: "Central — Chicago" },
+  { value: "America/Denver", label: "Mountain — Denver" },
+  { value: "America/Phoenix", label: "Mountain, no DST — Phoenix" },
+  { value: "America/Los_Angeles", label: "Pacific — Los Angeles" },
+  { value: "America/Anchorage", label: "Alaska — Anchorage" },
+  { value: "Pacific/Honolulu", label: "Hawaii — Honolulu" },
+  { value: "UTC", label: "UTC" },
+  { value: "Europe/London", label: "London" },
+  { value: "Europe/Paris", label: "Paris / Berlin / Madrid" },
+  { value: "Asia/Kolkata", label: "India — Kolkata" },
+  { value: "Asia/Shanghai", label: "China — Shanghai" },
+  { value: "Asia/Tokyo", label: "Japan — Tokyo" },
+  { value: "Australia/Sydney", label: "Sydney" },
+];
+
+type AvailabilityDayRow = { day: AvailabilityDay; open: boolean; start: string; end: string };
+
+// NOTE: only ever called from the `loader` (server-side) — `AVAILABILITY_DAYS`
+// is a runtime value imported from a `.server.ts` module, so calling this
+// from the client-rendered `Profile` component directly would pull a
+// server-only module into the client bundle ("Server-only module
+// referenced by client" at dev time). `Profile` itself only ever reads
+// the already-computed `availabilityRows` the loader returns.
+function computeAvailabilityRows(blocks: AvailabilityBlock[] | null | undefined): AvailabilityDayRow[] {
+  const byDay = new Map((blocks ?? []).map((b) => [b.day, b]));
+  return AVAILABILITY_DAYS.map((day) => {
+    const block = byDay.get(day);
+    return { day, open: !!block, start: block?.start ?? "09:00", end: block?.end ?? "17:00" };
+  });
+}
+
+/**
+ * "Professor's hours": the weekly windows this Human is generally
+ * available for a meeting (`humans.server.ts`'s `availability`/
+ * `timezone`) — a future "meeting scheduler" (`/org`'s own Meeting
+ * Schedulers section, and the `call-scheduler-test` seed) reads this,
+ * alone or combined with others', to offer real bookable times. Nothing
+ * computes those yet; this is purely where it's declared.
+ */
+function AvailabilityEditor({
+  initialTimezone,
+  initialRows,
+}: {
+  initialTimezone: string;
+  initialRows: AvailabilityDayRow[];
+}) {
+  const fetcher = useFetcher<typeof action>();
+  const [timezone, setTimezone] = useState(initialTimezone);
+  const [rows, setRows] = useState(initialRows);
+  const pending = fetcher.state !== "idle";
+  const result = fetcher.data?.intent === "update-availability" ? fetcher.data : undefined;
+  const error = result && "error" in result ? result.error : null;
+  const saved = !pending && !!result && "success" in result;
+
+  function updateRow(day: AvailabilityDay, patch: Partial<AvailabilityDayRow>) {
+    setRows((rs) => rs.map((r) => (r.day === day ? { ...r, ...patch } : r)));
+  }
+
+  return (
+    <fetcher.Form method="post" className="flex flex-col gap-4">
+      <input type="hidden" name="intent" value="update-availability" />
+      <div style={{ maxWidth: "280px" }}>
+        <Select
+          label="Timezone"
+          name="timezone"
+          value={timezone}
+          onChange={(e) => setTimezone(e.target.value)}
+          options={AVAILABILITY_TIMEZONE_OPTIONS}
+        />
+      </div>
+      <div className="flex flex-col gap-2">
+        {rows.map((row) => (
+          <div key={row.day} className="flex items-center gap-3 flex-wrap">
+            <div style={{ width: "140px", flexShrink: 0 }}>
+              <Checkbox
+                label={AVAILABILITY_DAY_LABELS[row.day]}
+                checked={row.open}
+                onChange={(checked) => updateRow(row.day, { open: checked })}
+                name={`open-${row.day}`}
+              />
+            </div>
+            {row.open ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  type="time"
+                  label={`${AVAILABILITY_DAY_LABELS[row.day]} starts`}
+                  hideLabel
+                  name={`start-${row.day}`}
+                  value={row.start}
+                  onChange={(e) => updateRow(row.day, { start: e.target.value })}
+                />
+                <span className="text-sm" style={{ color: "var(--text-subtle)" }}>
+                  to
+                </span>
+                <Input
+                  type="time"
+                  label={`${AVAILABILITY_DAY_LABELS[row.day]} ends`}
+                  hideLabel
+                  name={`end-${row.day}`}
+                  value={row.end}
+                  onChange={(e) => updateRow(row.day, { end: e.target.value })}
+                />
+              </div>
+            ) : (
+              <span className="text-sm" style={{ color: "var(--text-subtle)" }}>
+                Not available
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-3">
+        <button type="submit" className={button({ variant: "primary" })} disabled={pending}>
+          {pending ? "Saving…" : "Save availability"}
+        </button>
+        {saved && (
+          <span className="text-xs" style={{ color: "var(--text-subtle)" }}>
+            Saved.
+          </span>
+        )}
+        {error && (
+          <span className="text-xs" style={{ color: "var(--text-subtle)" }}>
+            {error}
+          </span>
+        )}
+      </div>
+    </fetcher.Form>
+  );
+}
+
 const PROFILE_SECTIONS = [
   { id: "basic", label: "Basic" },
+  { id: "availability", label: "Availability" },
   { id: "relationships", label: "Relationships" },
   { id: "security", label: "Security" },
   { id: "waivers", label: "Waivers" },
@@ -1573,6 +1775,8 @@ export default function Profile() {
     inviteExpired,
     revokedRelationships,
     organizationName,
+    availabilityTimezone,
+    availabilityRows,
   } = useLoaderData<typeof loader>();
   const actionData = useActionData<typeof action>();
   const { revalidate } = useRevalidator();
@@ -2294,7 +2498,23 @@ export default function Profile() {
               </div>
             </section>
 
-            {/* ── Relationships ──────────────────────────────────────── */}
+            {/* ── Availability ("professor's hours") ──────────── */}
+            <section id="availability" className="flex flex-col gap-4">
+              <h2 className="font-bold text-lg">Availability</h2>
+              <p className="text-sm" style={{ color: "var(--text-subtle)", margin: 0 }}>
+                Your own weekly "professor's hours" — when you're generally available for a meeting. A future
+                meeting scheduler reads this (plus the Organization's own observed holidays) to offer real
+                times; nothing books from it yet.
+              </p>
+              <div className={`${surfaceBase} p-4`}>
+                <AvailabilityEditor
+                  initialTimezone={availabilityTimezone}
+                  initialRows={availabilityRows}
+                />
+              </div>
+            </section>
+
+            {/* ── Relationships ──────────────────────── */}
             <section id="relationships">
               <h2 className="font-bold text-lg mb-1">Relationships</h2>
               <p

@@ -1,7 +1,7 @@
 // app/components/AppLayout.tsx
 import { Link, NavLink, useLocation } from "react-router";
 import { ReactNode, useState, useCallback, useEffect, useRef } from "react";
-import { useHome, useMaker, useUser, useVaultHidden, permissions } from "../hooks/useUser";
+import { useHome, useMaker, useOrgGuide, useUser, useVaultHidden, permissions } from "../hooks/useUser";
 import { displayName } from "robustness-core/data/humanNames";
 import noLogoColor from "../images/no-logo-color.svg";
 import noLogoWhite from "../images/no-logo-white.svg";
@@ -117,6 +117,7 @@ function getCurrentSectionLabel(pathname: string, homeLabel: string): string {
   if (pathname.startsWith("/daily-log")) return "Daily Log";
   if (pathname.startsWith("/vault")) return "Vault";
   if (pathname.startsWith("/profile")) return "Profile";
+  if (pathname.startsWith("/org")) return "Org";
   if (pathname.startsWith("/maker")) return "Maker";
   return homeLabel;
 }
@@ -245,6 +246,11 @@ export function AppLayout({ children }: { children?: ReactNode }) {
   const guidesAProject = useMaker();
   const showMaker = permissions.isAdmin(user) || guidesAProject;
   const makerItems = showMaker ? makerSubItems(user) : [];
+  // Org (office hours, observed holidays): for admins and for anyone who's
+  // a Guide on the Nopal Organization itself (`organizations.server.ts`),
+  // not just whoever guides a particular project -- see `org.tsx`.
+  const isOrgGuide = useOrgGuide();
+  const showOrg = permissions.isAdmin(user) || isOrgGuide;
   // A client gets their project, the Daily Log and their account, nothing
   // else (ADR-023); `/vault` refuses them on the server too.
   const showVault = !useVaultHidden();
@@ -271,7 +277,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
     decide();
     window.addEventListener("resize", decide);
     return () => window.removeEventListener("resize", decide);
-  }, [showVault, showMaker, homeLabel]);
+  }, [showVault, showOrg, showMaker, homeLabel]);
   useEffect(() => {
     if (nav === "words") setMenuOpen(false);
   }, [nav]);
@@ -308,7 +314,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
         >
           <img src={noLogoColor} alt="" className={topbarLogoImg} />
           <span className={topbarNav} style={{ margin: 0 }}>
-            {["Daily Log", homeLabel, ...(showVault ? ["Vault"] : []), ...(showMaker ? ["Maker"] : [])].map((label) => (
+            {["Daily Log", homeLabel, ...(showVault ? ["Vault"] : []), ...(showOrg ? ["Org"] : []), ...(showMaker ? ["Maker"] : [])].map((label) => (
               <span key={label} className={`${navLink({ context: "topbar" })} ${navLinkFontClass}`}>
                 {label}
               </span>
@@ -355,6 +361,17 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                 }
               >
                 Vault
+              </NavLink>
+            )}
+            {showOrg && (
+              <NavLink
+                to="/org"
+                prefetch="intent"
+                className={({ isActive }) =>
+                  `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
+                }
+              >
+                Org
               </NavLink>
             )}
             {showMaker && <MakerNavDropdown items={makerItems} />}
@@ -432,6 +449,18 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                   onClick={closeMenu}
                 >
                   Vault
+                </NavLink>
+              )}
+              {showOrg && (
+                <NavLink
+                  to="/org"
+                  prefetch="intent"
+                  className={({ isActive }) =>
+                    `${navLink({ context: "mobile", active: isActive })} ${navLinkFontClass}`
+                  }
+                  onClick={closeMenu}
+                >
+                  Org
                 </NavLink>
               )}
               {showMaker && (

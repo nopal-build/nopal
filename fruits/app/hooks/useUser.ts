@@ -28,6 +28,14 @@ export function useMaker(): boolean {
   return useMatches().some((m) => (m.data as { maker?: boolean } | null | undefined)?.maker === true);
 }
 
+/** True when the page's loader said this person is a Guide on the Nopal
+ * Organization (`navFor` → `getOrganizationRole`, `organizations.server.ts`):
+ * the nav then offers Org, where office hours and observed holidays are
+ * defined. An admin gets Org regardless, same as the Maker. */
+export function useOrgGuide(): boolean {
+  return useMatches().some((m) => (m.data as { orgGuide?: boolean } | null | undefined)?.orgGuide === true);
+}
+
 /** The first tab: My Project (straight to it) for someone on one active
  * project, My Projects otherwise. Pages that don't say (`navFor`) get My
  * Projects, and `/` sends a one-project person on. */

@@ -3,7 +3,7 @@ import type { FocusEventHandler } from "react";
 import { field, label as labelRecipe, wrapper } from "./input.css";
 
 type InputProps = {
-  type?: "text" | "textarea" | "date" | "number";
+  type?: "text" | "textarea" | "date" | "time" | "number";
   label: string;
   name: string;
   value?: string;
@@ -29,7 +29,7 @@ type InputProps = {
 export function Input(props: InputProps) {
   const { type = "text", name, defaultValue, value, placeholder } = props;
 
-  const isCompact = type === "date" || type === "number";
+  const isCompact = type === "date" || type === "time" || type === "number";
 
   const commonProps = {
     defaultValue,

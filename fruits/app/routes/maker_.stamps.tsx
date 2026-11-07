@@ -1460,8 +1460,8 @@ function FormInputsSection() {
         <p className={textSize.sm} style={{ color: semanticColors.textSubtle, maxWidth: "480px" }}>
           <Code>Input</Code> from <Code>stamps/Input</Code> — label,
           border, radius, and padding all baked in. Covers{" "}
-          <Code>text</Code>, <Code>textarea</Code>, <Code>number</Code>,
-          and <Code>date</Code> — pass <Code>type</Code>.
+          <Code>text</Code>, <Code>textarea</Code>, <Code>number</Code>,{" "}
+          <Code>date</Code>, and <Code>time</Code> — pass <Code>type</Code>.
         </p>
 
         <Grid gap={4} minColumnWidth={220} style={{ alignItems: "start" }}>
@@ -1474,6 +1474,7 @@ function FormInputsSection() {
           />
           <Input label="Max guests" name="max-guests" type="number" min={0} max={20} step={1} defaultValue="4" />
           <Input label="Start date" name="start-date" type="date" />
+          <Input label="Opens" name="opens-time" type="time" defaultValue="09:00" />
         </Grid>
 
         <Stack gap={3}>
