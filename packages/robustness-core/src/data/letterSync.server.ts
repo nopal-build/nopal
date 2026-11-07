@@ -77,9 +77,14 @@ async function ensureLettersSyncFolder(projectFolder: VaultFolder): Promise<Vaul
   return created;
 }
 
-/** The project's sent letters, as the projection reads them. A sender
- * is the guide who sent it; a letter sent before letters had a send
- * moment names nobody and goes under the project's creator. */
+/** The project's sent letters, as the projection reads them. The
+ * speaker is who the letter is from (`from_human_id`, who first sent it;
+ * a send again by someone else doesn't move its words to them); a letter
+ * from before houses is its last sender's; one sent before letters had a
+ * send moment names nobody and goes under the project's creator. A
+ * letter between guides is here like any other (Austin, 2026-11-05: it
+ * is not private; the graph is how people outside a correspondence meet
+ * what was said). */
 export async function sentLettersForSync(projectFolder: VaultFolder): Promise<SentLetterForSync[]> {
   const folder = await findLettersFolder(projectFolder);
   if (!folder) return [];
@@ -89,7 +94,7 @@ export async function sentLettersForSync(projectFolder: VaultFolder): Promise<Se
     if (!isMarkdownFileName(f.name) || f.archived_at) continue;
     const sent = sentCopyOf(f);
     if (!sent) continue;
-    out.push({ fileId: f._id, name: f.name, sent, senderHumanId: sent.byHumanId ?? projectFolder.human_id });
+    out.push({ fileId: f._id, name: f.name, sent, senderHumanId: f.from_human_id ?? sent.byHumanId ?? projectFolder.human_id });
   }
   return out;
 }

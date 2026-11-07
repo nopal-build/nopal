@@ -1,11 +1,13 @@
 /**
  * The dictate control (record-in-daily-log seed): one button, and a
- * short note when dictation ends on its own. Words not settled yet go to
- * `onProvisional` when the caller can show them in place (the daily
- * log's editor); a plain text box can't grey part of its text, so there
- * they show greyed beneath the button. Where the settled words go is the caller's:
- * the daily log's editor (`oxmarkdown/DictateButtonPlugin.tsx`) or a
- * plain text box (`DictateIntoText` below).
+ * short note when dictation ends on its own. Nothing else is ever drawn
+ * by the button (ADR-032): every word, settled or not, lands where typing
+ * would. The daily log's editor shows the unsettled ones greyed in the
+ * entry (`oxmarkdown/DictateButtonPlugin.tsx`); a plain text box shows
+ * them plain, since a textarea can't grey part of its text
+ * (`DictatedTextBox` below). Neither saves them: the editor's sync skips
+ * them, and the box keeps them out of its caller's value until they
+ * settle.
  *
  * Shown only where a page asks for it. The rule (Austin, 2026-11-02):
  * dictate where someone tells O.No what happened or thinks out loud for
@@ -14,6 +16,7 @@
  * does.
  */
 import { useEffect, useRef, useState } from "react";
+import { Input } from "stamps/Input";
 import {
   joinWords,
   startDictation,
@@ -35,18 +38,18 @@ export function DictateButton({
   onBegin: () => void;
   /** Settled words, in order; insert them. */
   onFinal: (text: string) => void;
-  /** Words not settled yet, replacing the last ones ("" clears them). */
-  onProvisional?: (text: string) => void;
+  /** Words not settled yet, replacing the last ones ("" clears them).
+   * Shown in place by the caller, never by the button. */
+  onProvisional: (text: string) => void;
 }) {
   const [state, setState] = useState<"idle" | "starting" | "on" | "stopping">("idle");
-  const [provisional, setProvisional] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const sessionRef = useRef<DictationSession | null>(null);
   // The latest `onFinal`, so a re-render mid-dictation is picked up.
   const onFinalRef = useRef(onFinal);
   onFinalRef.current = onFinal;
-  const onProvisionalRef = useRef(onProvisional ?? setProvisional);
-  onProvisionalRef.current = onProvisional ?? setProvisional;
+  const onProvisionalRef = useRef(onProvisional);
+  onProvisionalRef.current = onProvisional;
 
   // Leaving the page stops dictation.
   useEffect(() => () => sessionRef.current?.stop(), []);
@@ -93,7 +96,6 @@ export function DictateButton({
         <MicIcon on={state === "on"} />
         {label}
       </button>
-      {provisional && <div className="subtle-text">{provisional}</div>}
       {note && <div className="subtle-text">{note}</div>}
     </div>
   );
@@ -119,22 +121,39 @@ function today(): string {
 const startToday: DictationStarter = (target, handlers) => startDictation(today(), target, handlers);
 
 /**
- * Dictation into a plain text box. `fieldRef` wraps the box (a stamps
- * `Input`, which doesn't hand out its own element); the words go in at
- * the box's cursor as dictation starts, or at the end if it never had
- * one, and keep following on from there.
+ * A plain text box that can be dictated into: a stamps `Input` with the
+ * dictate button under it. `value` and `onChange` carry settled words
+ * only. Words not settled yet show in the box at the point the next
+ * settled ones will go, plain (a textarea can't grey part of itself),
+ * and leave the box as they settle or when dictation ends; the caller
+ * never sees them, so a draft's autosave never stores them. The words go
+ * in at the box's cursor as dictation starts, or at the end if it never
+ * had one, and keep following on from there. Typing while unsettled words
+ * show takes the box over: the guess is taken back out of what was typed
+ * before it reaches the caller (ADR-032: unsettled words are never
+ * saved), and the words that settle after it go in at the cursor as
+ * usual.
  */
-export function DictateIntoText({
+export function DictatedTextBox({
   target,
   value,
   onChange,
-  fieldRef,
+  name,
+  label,
+  placeholder,
+  start = startToday,
 }: {
   target: DictationTarget;
   value: string;
   onChange: (value: string) => void;
-  fieldRef: { current: HTMLElement | null };
+  name: string;
+  label: string;
+  placeholder?: string;
+  /** Tests hand in their own. */
+  start?: DictationStarter;
 }) {
+  const fieldRef = useRef<HTMLDivElement>(null);
+  const [provisional, setProvisional] = useState("");
   const valueRef = useRef(value);
   valueRef.current = value;
   const posRef = useRef(0);
@@ -148,24 +167,54 @@ export function DictateIntoText({
     const onFocus = () => (touchedRef.current = true);
     el.addEventListener("focusin", onFocus);
     return () => el.removeEventListener("focusin", onFocus);
-  }, [fieldRef]);
+  }, []);
 
   return (
-    <DictateButton
-      start={startToday}
-      target={target}
-      onBegin={() => {
-        const box = fieldRef.current?.querySelector("textarea, input") as HTMLTextAreaElement | null;
-        posRef.current = box && touchedRef.current ? box.selectionEnd : valueRef.current.length;
-      }}
-      onFinal={(text) => {
-        const { next, pos } = insertText(valueRef.current, posRef.current, text);
-        valueRef.current = next;
-        posRef.current = pos;
-        onChange(next);
-      }}
-    />
+    <>
+      <div ref={fieldRef}>
+        <Input
+          type="textarea"
+          name={name}
+          label={label}
+          hideLabel
+          value={shownText(value, posRef.current, provisional)}
+          placeholder={placeholder}
+          onChange={(e) => {
+            setProvisional("");
+            onChange(provisional ? withoutGuess(e.target.value, provisional) : e.target.value);
+          }}
+        />
+      </div>
+      <DictateButton
+        start={start}
+        target={target}
+        onBegin={() => {
+          const box = fieldRef.current?.querySelector("textarea, input") as HTMLTextAreaElement | null;
+          posRef.current = box && touchedRef.current ? box.selectionEnd : valueRef.current.length;
+        }}
+        onFinal={(text) => {
+          const { next, pos } = insertText(valueRef.current, posRef.current, text);
+          valueRef.current = next;
+          posRef.current = pos;
+          onChange(next);
+        }}
+        onProvisional={setProvisional}
+      />
+    </>
   );
+}
+
+/** Typed text with the engine's unsettled guess taken back out of it
+ * (its first occurrence; the guess was inserted whole). Pure. */
+export function withoutGuess(typed: string, guess: string): string {
+  const at = typed.indexOf(guess);
+  return at === -1 ? typed : typed.slice(0, at) + typed.slice(at + guess.length);
+}
+
+/** What the box shows: the settled words, with the unsettled ones (if
+ * any) where the next settled words will go. */
+export function shownText(value: string, pos: number, provisional: string): string {
+  return provisional ? insertText(value, pos, provisional).next : value;
 }
 
 /** Inserts `text` at `pos` in `value`, joined by `joinWords`. */

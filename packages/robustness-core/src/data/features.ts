@@ -20,12 +20,14 @@ export const CLIENT: Group = "Client";
 export const FEATURE_NAMES = [
   /** The Efforts page (the project README the skills write). */
   "efforts",
-  /** The Letters tab: where a guide works on the pages a client
-   * gets, each with its own public link (`letters.server.ts`).
-   * Reading only; uploading, replacing and the share switch are a
-   * Guide's. A Client has no tab: what is shared reaches them as the
-   * Letters tile in the project's banner (Austin, 2026-10-22: "the
-   * tab is for deliverables that are being worked"). */
+  /** The Letters tab, which is the desk: where letters are written and
+   * kept (`letters.server.ts`, `letterHouses.ts`). The tab alone: who
+   * writes which letter is `mayWriteLetter` (a Guide on the project, or
+   * a client for their own), and the Letters folder in the Vault stays a
+   * Guide's (`writesInFolder`). Crafters and Observers read. A Client
+   * has the tab since 2026-11-06 (Austin, 2026-11-05: both houses
+   * write), drawn with less on it (`deskRows`); mail reaches everyone at
+   * the mailbox in the project's banner. */
   "letters",
   /** The Photos tab, and the photos themselves, never a cost file. */
   "photos",
@@ -84,7 +86,7 @@ export const GROUP_FEATURES: Record<Group, readonly Feature[]> = {
   Guide: [...READING, "marks", "steepTap", "steepReadings", "dailyLog", "edit", "people", "feeds", "suggestions", "budget", "print"],
   Crafter: [...READING, "marks", "steepTap", "dailyLog", "edit", "feeds", "print"],
   Observer: [...READING, "marks", "steepTap", "dailyLog", "print"],
-  Client: ["efforts", "photos", "files", "marks", "steepTap", "dailyLog", "feeds", "print"],
+  Client: ["efforts", "letters", "photos", "files", "marks", "steepTap", "dailyLog", "feeds", "print"],
 };
 
 /** The groups someone may give: every group for an admin; a Guide who

@@ -137,19 +137,22 @@ describe("the browser's half", () => {
   });
 
   it("is offered to a guide on a letter they can edit, and lands through the editor's own autosave", () => {
-    const vault = readFileSyncText(path.join(here, "../routes/vault.tsx"));
-    expect(vault).toContain("recordable={!!letterSend}");
-    expect(vault).toContain("recordable && editable && folderId");
-    expect(vault).toContain("updateBody((prev) => setLeadingRecording(prev, recordingFileId))");
+    // The editor was lifted out of the Vault's file on 2026-11-06 so the desk can mount it; the lines are the same.
+    const writing = readFileSyncText(path.join(here, "../components/LetterWriting.tsx"));
+    const letterEditor = readFileSyncText(path.join(here, "../components/LetterSplitEditor.tsx"));
+    const splitEditor = readFileSyncText(path.join(here, "../components/MarkdownSplitEditor.tsx"));
+    expect(writing).toContain("recordable={!!send}");
+    expect(letterEditor).toContain("recordable && editable && folderId");
+    expect(letterEditor).toContain("updateBody((prev) => setLeadingRecording(prev, recordingFileId))");
     // The picker stays images-only; the recording arrives only through the control.
-    expect(vault).toContain('candidates.filter((f) => f.type.startsWith("image/"))');
+    expect(splitEditor).toContain('candidates.filter((f) => f.type.startsWith("image/"))');
   });
 });
 
 describe("the worker's half", () => {
-  it("asks only for a guide, and only for a video beside the letter", () => {
+  it("asks only for the letter's writer (a guide, or a client on their own), and only for a video beside the letter", () => {
     const route = readFileSyncText(path.join(here, "../routes/api.letter.$fileId.recording.tsx"));
-    expect(route).toContain("letterForManager(request, fileId)");
+    expect(route).toContain("letterForWriter(request, fileId)");
     expect(route).toContain("recording.folder_id !== got.file.folder_id");
     expect(route).toContain('recording.content_type.startsWith("video/")');
     expect(route).not.toMatch(/ffmpeg|letterRecording\.server"/);

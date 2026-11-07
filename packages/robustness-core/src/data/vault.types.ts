@@ -89,6 +89,19 @@ export type FileRef = {
   sent_date?: string | null;
   sent_by_human_id?: string | null;
   sent_count?: number | null;
+  /** Who a sent letter is from, the house it came from and the house it
+   * went to (`letterHouses.ts`; Austin, 2026-11-05: a letter is written
+   * by a person and delivered to a house). `to_house` is written when
+   * the letter is started, picked on the New letter form (the letters
+   * route, `houseAtStart`); `sendLetter` writes the other two on the
+   * first send, and none of the three changes after: whoever sends it
+   * again and whatever becomes of that person's role. A letter sent
+   * before 2026-11-05 has none and shows to everyone, as it did. They
+   * decide who is shown the letter, so those are the only two writers
+   * (the editor's save, Replace and copy all name their keys). */
+  from_human_id?: string | null;
+  from_house?: string | null;
+  to_house?: string | null;
 };
 
 /**

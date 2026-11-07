@@ -1,6 +1,6 @@
 /**
  * Letters (Austin, 2026-10-06 and 2026-10-21; the word, 2026-10-27):
- * a letter is a human message from a guide to the client, each one
+ * a letter is a human message from one house to the other, each one
  * markdown file in the project's `Letters` folder, listed on the
  * project's Letters tab and shared by its own public link. Called
  * "deliverables" until 2026-10-27; the rename changed the word in the
@@ -26,12 +26,21 @@
  *   folder-browsing routes too). The link is the file's own id, so off
  *   then on gives the same URL: the ids are 20 random characters
  *   (`newRecordId`), already unguessable; no token table.
- * - Who switches, uploads and replaces: a Guide on the project, or staff
- *   (`canManageLetters`). A Client reads.
+ * - Who switches the link, uploads and replaces: a Guide on the project,
+ *   or staff (`canManageLetters`). Who writes, talks, sends and deletes:
+ *   `mayWriteLetter` (`letterHouses.ts`), a client for their own letter
+ *   included.
  * - The public page is live: every request re-reads the file, so a
  *   replace shows at once under the same link. Off, or a trashed
  *   project, is a 404.
  * - Nothing turns a link on at upload. A person does.
+ * - Who is shown a sent letter (Austin, 2026-11-05): it is delivered to
+ *   a house, the clients' or the guides', and shown to the house it went
+ *   to and the house it came from (`letterHouses.ts`). The mailbox on the
+ *   project's page holds what came to the viewer's house
+ *   (`mailboxLines`); the member's door refuses a Client a letter the
+ *   guides sent the guides (`resolveSentLetterForHouse`). A letter sent
+ *   before houses has none and shows to everyone, as it did.
  *
  * The PDF is the public page printed by the worker, keyed by the file's
  * content hash (`letterPdf.server.ts`). The share route, the replace
@@ -39,8 +48,8 @@
  * stays free of the queue so the two don't import each other.
  *
  * Two doors in, one file (Austin, 2026-10-21: a letter is a website
- * page that lives in a project). Written here: the Vault's split editor
- * (`vault.tsx`, `LetterSplitEditor`), where a dropped or pasted
+ * page that lives in a project). Written at the desk in its project
+ * (`letterDesk.server.ts`, `LetterWriting`), where a dropped or pasted
  * picture uploads beside the file and lands in the text as a standard
  * markdown image. Brought from outside: the markdown and its pictures in
  * one upload; `rewriteLocalImagePaths` points every local image path at
@@ -50,6 +59,9 @@
 
 import crypto from "node:crypto";
 import { isStaff, type Human } from "./humans.server";
+import { addressedTo, houseMayOpen, houseOf, housesInMailbox, housesOf, mayWriteLetter, type House, type LetterHouses, type LetterViewer } from "./letterHouses";
+import { houseMembers } from "./letterHouses.server";
+import { canReadFile } from "./featureAccess.server";
 import { findOwningProjectFolder, getProjectRole, type ResolvedProjectRole } from "./projectSharing.server";
 import { getProjectStatus } from "./projectStatus.server";
 import { merge } from "./generic.server";
@@ -129,6 +141,15 @@ export type LetterRow = {
   sentHash: string | null;
   /** The draft differs from what the client has. */
   editedSinceSent: boolean;
+  /** Who it is from and its two houses (`letterHouses.ts`); null for a
+   * draft and for a letter sent before houses. */
+  houses: LetterHouses | null;
+  /** Who it is from, on a draft too: a client's draft says so from the
+   * start (`mayWriteLetter`); a guide's says nothing until sent. */
+  fromHumanId: string | null;
+  /** Where it is going: its house once sent, else where its draft was
+   * addressed when it was started (`addressedTo`); null when neither. */
+  toHouse: House | null;
 };
 
 /** The client's copy of a letter: what was sent, when, and how many
@@ -227,6 +248,9 @@ export async function listLetters(project: VaultFolder): Promise<LetterRow[]> {
       sentCount: sentCopyOf(f)?.count ?? 0,
       sentHash: sentCopyOf(f)?.hash ?? null,
       editedSinceSent: letterEditedSinceSent(f),
+      houses: housesOf(f),
+      fromHumanId: f.from_human_id ?? null,
+      toHouse: addressedTo(f),
     }))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
@@ -253,13 +277,17 @@ export function letterShareRefusal(input: { manages: boolean; inLetters: boolean
   return null;
 }
 
-/** The send's own refusals: the same three, pure. */
-export function letterSendRefusal(input: { manages: boolean; inLetters: boolean; isMarkdown: boolean }): LetterRefusal | null {
+/** The send's own refusals, pure. `writes` is `mayWriteLetter`: a guide
+ * for the guides' letters, a client for their own. */
+export function letterSendRefusal(input: { writes: boolean; inLetters: boolean; isMarkdown: boolean }): LetterRefusal | null {
   if (!input.inLetters) return { status: 400, error: "Only a file in the project's Letters folder can be sent" };
   if (!input.isMarkdown) return { status: 400, error: "Only a markdown letter can be sent" };
-  if (!input.manages) return { status: 403, error: "Only a Guide on this project can send a letter" };
+  if (!input.writes) return { status: 403, error: LETTER_NOT_YOURS_TO_SEND };
   return null;
 }
+
+// Words a person reads (Nopal's voice; listed in the round's return leg).
+export const LETTER_NOT_YOURS_TO_SEND = "This letter isn't yours to send.";
 
 /** Where a file lives, when it is a letter: its Letters folder
  * and the project that folder belongs to. Null for any other file. */
@@ -328,20 +356,29 @@ export async function ensureSentCopy(file: FileRef): Promise<FileRef> {
 }
 
 /**
- * A sent letter, for someone on the project (any group, a Client
- * included: ADR-023 keeps them out of the cache, so this is their door)
- * when the link is off. Null for a draft, for someone off the project,
- * or for a trashed project.
+ * A sent letter, for someone in one of its houses (`houseMayOpen`,
+ * Austin 2026-11-05): on the project, any group, a Client included
+ * (ADR-023 keeps them out of the cache, so this is their door), when the
+ * link is off. Null for a draft, for someone off the project, for a
+ * trashed project, and for a letter that has a house and neither came
+ * from nor went to the viewer's: a Client and a letter the guides sent
+ * the guides. This is a Client's only door to
+ * a sent letter's words, its pictures and its PDF (the letter's routes
+ * all ask it, through `resolveReadableLetter` or directly), so the
+ * refusal is here once. A letter with no house is past the check before
+ * anyone's house is looked at, and reads as it always did.
  */
-export async function resolveSentLetterForMember(fileId: string, humanId: string): Promise<{ file: FileRef; project: VaultFolder } | null> {
+export async function resolveSentLetterForHouse(fileId: string, humanId: string): Promise<{ file: FileRef; project: VaultFolder } | null> {
   const sent = await resolveSentLetter(fileId);
   if (!sent) return null;
-  if (!(await getProjectRole(sent.project, humanId))) return null;
+  const role = await getProjectRole(sent.project, humanId);
+  if (!role) return null;
+  if (!houseMayOpen(sent.file, houseOf(role.role))) return null;
   return sent;
 }
 
 /** A sent letter whatever its link, for whoever the caller has already
- * let in: someone on the project (`resolveSentLetterForMember`), or the
+ * let in: someone on the project (`resolveSentLetterForHouse`), or the
  * worker printing it under a render pass (`letterRenderPass.server.ts`).
  * Null for a draft, a non-letter, or a trashed project. */
 export async function resolveSentLetter(fileId: string): Promise<{ file: FileRef; project: VaultFolder } | null> {
@@ -365,7 +402,7 @@ export async function resolveReadableLetter(
   const shared = await resolveSharedLetter(fileId);
   if (shared) return shared;
   if (reader.rendering) return resolveSentLetter(fileId);
-  return reader.viewerHumanId ? resolveSentLetterForMember(fileId, reader.viewerHumanId) : null;
+  return reader.viewerHumanId ? resolveSentLetterForHouse(fileId, reader.viewerHumanId) : null;
 }
 
 /** Where the public page loads one of the letter's files from. */
@@ -377,14 +414,36 @@ export function letterPublicPath(fileId: string): string {
   return `/public/letter/${fileId}`;
 }
 
-/** What the banner's Letters tile lists: the sent ones, by title, each
- * to the letter's page, where a member reads the sent copy logged in.
- * Everyone on the project sees the same tile, so a Guide sees what the
- * client sees. Pure. */
-export function sentLetterLinks(rows: Pick<LetterRow, "fileId" | "title" | "sentDate" | "sentCount">[]): { fileId: string; title: string; path: string; sentDate: string; updated: boolean }[] {
+/** One line in the mailbox: a sent letter that came to the viewer's
+ * house. `unopened` is the viewer's own flag for that letter and nobody
+ * else's. */
+export type MailLine = { fileId: string; title: string; path: string; sentDate: string; updated: boolean; fromHumanId: string | null; unopened: boolean };
+
+/** What is in someone's mailbox (`housesInMailbox`): the letters sent to their
+ * house by someone other than them, kept after they are opened, newest
+ * send day first; and every letter sent before houses, which nothing can
+ * place and which goes on showing to everyone. `flagged` is the viewer's
+ * own flags (`flaggedLetterIds`); a letter with no house never has one.
+ * The flag on the project's page is "any line here is unopened", so a row
+ * left behind by a letter that is gone raises nothing. Pure. */
+export function mailboxLines(
+  rows: readonly Pick<LetterRow, "fileId" | "title" | "sentDate" | "sentCount" | "houses">[],
+  viewer: { humanId: string; house: House | null },
+  flagged: ReadonlySet<string> = new Set(),
+): MailLine[] {
   return rows
     .filter((r): r is typeof r & { sentDate: string } => !!r.sentDate)
-    .map((r) => ({ fileId: r.fileId, title: r.title, path: letterPublicPath(r.fileId), sentDate: r.sentDate, updated: r.sentCount > 1 }));
+    .filter((r) => housesInMailbox(r.houses, viewer))
+    .map((r) => ({
+      fileId: r.fileId,
+      title: r.title,
+      path: letterPublicPath(r.fileId),
+      sentDate: r.sentDate,
+      updated: r.sentCount > 1,
+      fromHumanId: r.houses?.fromHumanId ?? null,
+      unopened: !!r.houses && flagged.has(r.fileId),
+    }))
+    .sort((a, b) => b.sentDate.localeCompare(a.sentDate));
 }
 
 /** The file as the public page shows it: no front matter, every file URL
@@ -422,6 +481,28 @@ export async function letterPageFile(fileId: string, id: string, viewerHumanId?:
   const sent = sentCopyOf(found.file);
   if (!sent || !letterFileIds(sent.content).has(id)) return null;
   return (await getFileRefById(id)) ?? null;
+}
+
+/** The file a letter's writer may load while drafting, or null: the
+ * letter's own page and the editor's preview draw the draft through the
+ * letter's routes, since the Vault's file routes refuse a client
+ * (ADR-023). The person may write the letter (`resolveLetterForWriter`),
+ * and the file is one they put beside it themselves (in the letter's
+ * folder, stored under their own key: every upload's key starts with
+ * the uploader's id, and the worker's transcode keeps it), or one they
+ * may read anyway (`canReadFile`: a project photo through the Photos
+ * rows, their own day's original). Served whether or not the draft
+ * names it yet, since a dropped picture is drawn before the autosave
+ * lands. Not the folder's other files: a picture beside a letter the
+ * guides sent the guides is not this writer's to see. Asked after
+ * `letterPageFile` says no. */
+export async function letterDraftFile(fileId: string, id: string, actor: Pick<Human, "_id" | "role">): Promise<FileRef | null> {
+  const mine = await resolveLetterForWriter(fileId, actor);
+  if (!mine) return null;
+  const ref = await getFileRefById(id);
+  if (!ref || ref.archived_at) return null;
+  if (ref.folder_id === mine.file.folder_id && ref.s3_key?.startsWith(`vault/${actor._id}/`)) return ref;
+  return (await canReadFile(actor._id, ref)) ? ref : null;
 }
 
 /** Every file id a resolved `::LoadCellGraph{fileId="..."}` directive
@@ -497,11 +578,9 @@ export interface LetterPage {
    * minus the final `/<id>` (the route builds `${videoViewUrlBase}/${id}`
    * — loader data can't carry a function across the wire, the same reason
    * `downloadUrl`/`pdfUrl` are plain strings a `::LoadCellGraph{...}`'s own
-   * download buttons build on). `null` for a preview, same as a picture:
-   * the Guide's own session already serves `/api/vault/view/<id>` directly
-   * (`OxRenderer`'s own default when no override is given), and the letter
-   * route (`letterPageFile`) has no "manager preview" door to admit an
-   * unsent draft's files through anyway. */
+   * download buttons build on). Set for a preview too: the letter's routes
+   * serve a draft's files to its writer (`letterDraftFile`), which is how
+   * a client sees their own pictures (the Vault's routes refuse them). */
   videoViewUrlBase: string | null;
 }
 
@@ -511,12 +590,13 @@ export function letterPage(
   preview = false,
   loadCellGraphs: Record<string, ResolvedLoadCellGraph> = {},
 ): LetterPage {
-  // A preview is the draft with the session's view URLs: the Guide has a
-  // session, and the letter's file routes serve only the sent copy. The
-  // page itself is the sent copy, rewritten to the letter's own routes.
+  // A preview is the draft; the page itself is the sent copy. Both are
+  // rewritten to the letter's own routes, which serve the sent copy's
+  // files to its readers and a draft's to its writer (`letterDraftFile`),
+  // so the preview is what the page will be, for a client too.
   const sent = preview ? null : sentCopyOf(file);
   const source = sent ? sent.content : (file.content ?? "");
-  const body = preview ? splitFrontmatter(source).body : publicLetterBody(source, file._id);
+  const body = publicLetterBody(source, file._id);
   const dated = sent ? `${sent.date}T00:00:00Z` : file.updated_at;
   return {
     title: letterTitle({ name: file.name, content: source }),
@@ -531,7 +611,7 @@ export function letterPage(
     preview,
     linkOn: !preview && !!file.shared_at,
     loadCellGraphs,
-    videoViewUrlBase: preview ? null : `/api/letter/${file._id}/view`,
+    videoViewUrlBase: `/api/letter/${file._id}/view`,
   };
 }
 
@@ -554,21 +634,48 @@ export async function resolveLetterPage(
   return letterPage(file, origin, preview, loadCellGraphs);
 }
 
-/** A letter a Guide may preview before its link is on (Austin,
- * 2026-10-21: the title on the tab always opens what the client would
- * see). Null for anyone who doesn't manage the project's letters,
- * for a non-letter, or for a trashed project. */
-export async function resolveLetterForManager(
+/** Who is writing, as the write rule sees them (`mayWriteLetter`): a
+ * client's letter is a client's, anyone else's a guide's. */
+export type LetterWriterKind = "guide" | "client";
+
+/** The viewer `mayWriteLetter` reads, from a role already resolved. */
+export function letterViewerOf(humanId: string, role: Pick<ResolvedProjectRole, "role" | "guiding"> | null | undefined): LetterViewer {
+  return { humanId, house: houseOf(role?.role), guiding: !!role?.guiding };
+}
+
+/** A letter this person may write (`mayWriteLetter`, `letterHouses.ts`):
+ * a Guide on the project for any letter but a client's, a client for a
+ * letter from them. Null for anyone else, for a non-letter, an archived
+ * one, or a trashed project. Every write route and the writing page ask
+ * this; the brief alone stays the manager's (`letterForManager`, in the
+ * app). Before the send the title on the tab opens the writer's preview
+ * (Austin, 2026-10-21: it always opens what the reader would see). */
+export async function resolveLetterForWriter(
   fileId: string,
   actor: Pick<Human, "_id" | "role">,
-): Promise<{ file: FileRef; project: VaultFolder } | null> {
+): Promise<{ file: FileRef; project: VaultFolder; writer: LetterWriterKind } | null> {
   const file = await getFileRefById(fileId);
   if (!file || file.archived_at || !isMarkdownFileName(file.name)) return null;
   const home = await letterHome(file);
   if (!home || getProjectStatus(home.project) === "trashed") return null;
-  if (!canManageLetters(actor, await getProjectRole(home.project, actor._id))) return null;
-  return { file, project: home.project };
+  const viewer = letterViewerOf(actor._id, await getProjectRole(home.project, actor._id));
+  if (!mayWriteLetter(viewer, file, await houseMembers(home.project))) return null;
+  return { file, project: home.project, writer: viewer.house === "clients" ? "client" : "guide" };
 }
+
+/** The Vault's back room asks this before it changes a letter's file
+ * (`api.vault.$fileId.tsx`'s PATCH and DELETE, `fileReplaceRefusal`):
+ * a letter is changed by whoever may write it and nobody else, in the
+ * Vault as at the desk, so a guide cannot edit, delete or replace a
+ * client's draft there (Austin, 2026-11-05: a client's draft is theirs
+ * alone). Null for a file that is not a letter, which the Vault's own
+ * rules decide. */
+export async function letterChangeRefusal(file: FileRef, actor: Pick<Human, "_id" | "role">): Promise<{ status: 403; error: string } | null> {
+  if (!isMarkdownFileName(file.name) || !(await letterHome(file))) return null;
+  return (await resolveLetterForWriter(file._id, actor)) ? null : { status: 403, error: LETTER_NOT_YOURS };
+}
+
+export const LETTER_NOT_YOURS = "This letter isn't yours to change.";
 
 /** The text a new letter starts with: a title in front matter (the
  * tab and the public page read it) and the heading the page opens on. */

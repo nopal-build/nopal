@@ -1,15 +1,17 @@
 import crypto from "node:crypto";
 import type { ActionFunctionArgs } from "react-router";
-import { getUserFromRequest } from "../modules/auth/auth.server";
+import { getUserFromRequest, isImpersonating } from "../modules/auth/auth.server";
 import { createFileRef, getFileRefsByFolderIds, getFolderById, updateFileRef } from "robustness-core/data/vault.server";
 import { uploadFileToS3 } from "robustness-core/data/file.server";
 import { enqueueRenditionsJob } from "robustness-core/data/mediaQueue.server";
 import { getProjectRole, isProjectFolder } from "robustness-core/data/projectSharing.server";
 import { createMark, markDate } from "robustness-core/data/graphLogMarks.server";
-import { requestBrief } from "robustness-core/data/brief.server";
+import { requestBrief, writeLetterBriefRow } from "robustness-core/data/brief.server";
+import { reflectionToStartFrom } from "robustness-core/data/letterReflection.server";
 import {
   canManageLetters,
   letterFileName,
+  letterViewerOf,
   letterPurposeMark,
   ensureLettersFolder,
   newLetterContent,
@@ -17,6 +19,9 @@ import {
   splitUploadBundle,
   type UploadedPicture,
 } from "robustness-core/data/letters.server";
+import { merge } from "robustness-core/data/generic.server";
+import { houseAtStart, mayStartLetter, projectHasClients } from "robustness-core/data/letterHouses";
+import { houseMembers } from "robustness-core/data/letterHouses.server";
 import type { FileRef } from "robustness-core/data/vault.types";
 
 // Same cap as /api/vault/upload: markdown is stored as the record's own
@@ -42,17 +47,33 @@ const MAX_INLINE_MARKDOWN_BYTES = 5 * 1024 * 1024;
  *   (`markDate`, the daily log's rule). Refused without one. An upload
  *   may carry `purpose` too; without it the letter has none until the
  *   brief asks.
+ *   A new letter also carries `to`, the house it is for ("clients" or
+ *   "guides", shown as the team): required on a project with clients,
+ *   refused without it (`houseAtStart`). An upload carries none and is
+ *   asked at Send.
  *   Starting a letter with "Write the brief first" is also the click that
  *   writes its brief (Austin, 2026-10-28; the form says so): the route
  *   asks the worker for it (`requestBrief`) once the letter and its
  *   purpose exist. `brief=skip` ("Go straight to the letter", Austin
  *   2026-11-03) runs nothing; the letter's page offers the brief later.
  *   The upload path does not; "Write it again" on the letter's page does.
- * A Guide on the project or staff (`canManageLetters`). Replacing an
+ *
+ * A client starts a letter too (Austin, 2026-11-05: both houses write;
+ * `mayStartLetter`), never uploads one. Theirs goes to the team whatever
+ * the form says, is from them from this moment (`from_human_id` on the
+ * draft, which is what makes it theirs: `mayWriteLetter`), takes no
+ * purpose line and gets no brief ("A client is not offered the purpose
+ * line... and does not get the brief"). A kept talk-through (`from`)
+ * starts theirs as it starts a guide's.
+ * Bringing one in is a manager's (`canManageLetters`). Replacing an
  * existing one is `/api/vault/replace/:fileId`, which keeps the id and so
  * the link. Nothing is shared by this route: the link is a separate
  * switch.
  */
+// Words a person reads (Nopal's voice; listed in the round's return leg).
+const LETTER_FROM_GONE = "What you said about that letter isn't there to start from.";
+const LETTER_START_REFUSED = "You can't start a letter on this project.";
+
 export async function action({ request, params }: ActionFunctionArgs) {
   const user = await getUserFromRequest(request);
   if (!user) return Response.json({ error: "Not authenticated" }, { status: 401 });
@@ -60,14 +81,25 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   const project = params.folderId ? await getFolderById(params.folderId) : null;
   if (!project || !(await isProjectFolder(project))) return Response.json({ error: "Project not found" }, { status: 404 });
-  if (!canManageLetters(user, await getProjectRole(project, user._id))) {
-    return Response.json({ error: "Only a Guide on this project can add a letter" }, { status: 403 });
+  const role = await getProjectRole(project, user._id);
+  const viewer = letterViewerOf(user._id, role);
+  const manages = canManageLetters(user, role);
+  // Starting a letter is a Guide's or a client's (`mayStartLetter`), the
+  // same rule as the desk that opens it next; staff off the project,
+  // who manage but do not write, start none (they could not open it).
+  // Bringing a letter in from outside stays the manager's.
+  const asClient = viewer.house === "clients";
+  if (!mayStartLetter(viewer)) {
+    return Response.json({ error: LETTER_START_REFUSED }, { status: 403 });
   }
 
   const form = await request.formData();
   const files = form.getAll("file").filter((f): f is File => f instanceof File);
   const name = typeof form.get("name") === "string" ? String(form.get("name")).trim() : "";
-  const purpose = typeof form.get("purpose") === "string" ? String(form.get("purpose")).trim() : "";
+  // A client's letter has no purpose line, whatever the form carried.
+  const purpose = !asClient && typeof form.get("purpose") === "string" ? String(form.get("purpose")).trim() : "";
+  // Bringing a letter from outside is a manager's (the file, its pictures).
+  if (files.length > 0 && !manages) return Response.json({ error: LETTER_START_REFUSED }, { status: 403 });
   const date = markDate(typeof form.get("date") === "string" ? String(form.get("date")) : undefined);
 
   /** The purpose line, on the record and in the graph as the guide's words. */
@@ -86,7 +118,27 @@ export async function action({ request, params }: ActionFunctionArgs) {
 
   if (files.length === 0) {
     if (!name) return Response.json({ error: "No file provided" }, { status: 400 });
-    if (!purpose) return Response.json({ error: "Say what this letter is for first." }, { status: 400 });
+    if (!purpose && !asClient) return Response.json({ error: "Say what this letter is for first." }, { status: 400 });
+    // Who it is for, picked on the same form (Austin, 2026-11-05: "what's
+    // the title, why are you writing it, and who are you writing it to"):
+    // the clients or the team, no default; nothing to pick on a project
+    // with no clients (`houseAtStart`). Kept on the draft, and Send
+    // delivers it there. A client's goes to the team, always, and the
+    // form has nothing to pick.
+    const address = asClient
+      ? ({ ok: true, toHouse: "guides" } as const)
+      : houseAtStart({ projectHasClients: projectHasClients(await houseMembers(project)), asked: form.get("to") });
+    if (!address.ok) return Response.json({ error: address.error }, { status: address.status });
+    // Started from what this guide said about a letter they read (`from`,
+    // that letter's id; Austin, 2026-11-06: "spending the time to sit
+    // down and write a letter back, based on those thoughts"). Still a
+    // new letter with its own title, purpose and address. Asked again
+    // here, whatever the page offered: theirs, kept, a letter they may
+    // still open, in this project; and never for an admin looking as
+    // them, since it carries their words into a letter.
+    const fromLetterId = typeof form.get("from") === "string" ? String(form.get("from")) : "";
+    const startFrom = fromLetterId && !(await isImpersonating(request)) ? await reflectionToStartFrom(project, fromLetterId, user._id) : null;
+    if (fromLetterId && !startFrom) return Response.json({ error: LETTER_FROM_GONE }, { status: 400 });
     const folder = await ensureLettersFolder(project);
     const content = newLetterContent(name);
     const fileRef = await createFileRef({
@@ -99,11 +151,34 @@ export async function action({ request, params }: ActionFunctionArgs) {
       folder_id: folder._id,
     });
     if (!fileRef) return Response.json({ error: "The letter didn't save. Try again." }, { status: 500 });
-    await recordPurpose(fileRef);
+    // `merge`: the address is not one of the fields a save may set. A
+    // client's draft also says who it is from, which is what makes it
+    // theirs and nobody else's (`mayWriteLetter`); a guide's says so at
+    // its first send (`sendLetter`).
+    await merge("file_refs", fileRef._id, { to_house: address.toHouse, ...(asClient ? { from_human_id: user._id } : {}) });
+    if (purpose) await recordPurpose(fileRef);
+    if (startFrom) {
+      // Their reflection is this letter's talk-through, and it is already
+      // on the record (its Card and day come with it, so Send lands
+      // nothing twice). Which letter was read is kept on the letter's
+      // workings, for the outline; the letter's own record names no other
+      // letter. No brief: the letter they read stands where it would.
+      await writeLetterBriefRow(fileRef._id, {
+        letter_file_id: fileRef._id,
+        project_folder_id: project._id,
+        talk_through: startFrom.row.text,
+        talk_through_at: startFrom.row.kept_at ?? new Date().toISOString(),
+        talk_through_by_human_id: user._id,
+        talk_through_date: startFrom.row.kept_date ?? null,
+        talk_through_card_file_id: startFrom.row.card_file_id ?? null,
+        reflects_on_letter_file_id: fromLetterId,
+      });
+      return Response.json({ fileId: fileRef._id, pictures: 0, unmatched: [], briefJobId: null }, { status: 201 });
+    }
     // The brief starts as the letter opens. A queue that refuses leaves a
     // letter with no brief and the page's own button; never a lost letter.
     let briefJobId: string | null = null;
-    if (String(form.get("brief") ?? "") !== "skip") {
+    if (!asClient && String(form.get("brief") ?? "") !== "skip") {
       try {
         const asked = await requestBrief(project, { ...fileRef, purpose }, user._id);
         if (asked.ok) briefJobId = asked.jobId;

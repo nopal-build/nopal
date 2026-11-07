@@ -2,7 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { getScopedUserFromRequest } from "../modules/auth/auth.server";
 import { createMultipartUpload } from "robustness-core/data/file.server";
 import { canWriteToFolderId, explainWriteRefusal, getFileRefById, getFolderById, isFolderUnderSyncs } from "robustness-core/data/vault.server";
-import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
+import { canUploadToFolder } from "robustness-core/data/letterUpload.server";
 import { fileReplaceRefusal } from "robustness-core/data/fileReplace.server";
 
 /**
@@ -30,6 +30,9 @@ export async function action({ request }: ActionFunctionArgs) {
     folderId?: string | null;
     originalName?: string;
     replaceFileId?: string;
+    /** The letter this upload is for, when it is a letter's writer
+     * putting a recording beside it (`canUploadToFolder`). */
+    letterFileId?: string | null;
   };
 
   const { filename, contentType, replaceFileId } = body;
@@ -76,7 +79,10 @@ export async function action({ request }: ActionFunctionArgs) {
   if (folderId && !folder) {
     return Response.json({ error: "Folder not found" }, { status: 404 });
   }
-  if (folder && !(await canActAsProjectOwner(user._id, folder.human_id, folderId))) {
+  // A letter's writer may put a picture or a recording beside their own
+  // letter (`letterFileId`, the letter's id; `canUploadToFolder`): the
+  // door a client has, since the Letters folder is otherwise a Guide's.
+  if (folder && !(await canUploadToFolder(user, folder, { letterFileId: body.letterFileId, file: { name: filename, type: contentType } }))) {
     return Response.json(
       { error: "You don't have permission to upload files here" },
       { status: 403 },
