@@ -17,19 +17,26 @@
  */
 
 import type { Human } from "./humans.server";
-import { resolveLetterForWriter } from "./letters.server";
+import { isMarkdownFileName, resolveLetterForWriter } from "./letters.server";
 import { canActAsProjectOwner } from "./projectSharing.server";
 import type { VaultFolder } from "./vault.types";
 
-/** What a letter's writer may put beside it: a picture or a video. */
-export function isLetterMedia(file: { type: string }): boolean {
-  return file.type.startsWith("image/") || file.type.startsWith("video/");
+/** What a letter's writer may put beside it: a picture or a video, by
+ * name and type together. The type is the browser's word and the name
+ * is the file's: a `.md` sent as `image/png` is a letter (the store
+ * files it by name), and a HEIC the browser gives no type for is a
+ * picture. Never a markdown file. */
+export function isLetterMedia(file: { name: string; type: string }): boolean {
+  if (isMarkdownFileName(file.name)) return false;
+  const byType = file.type.startsWith("image/") || file.type.startsWith("video/");
+  const byName = /\.(jpe?g|png|gif|webp|heic|heif|avif|svg|mp4|webm|mov|m4v)$/i.test(file.name);
+  return byType || byName;
 }
 
 export async function canUploadToFolder(
   user: Pick<Human, "_id" | "role">,
   folder: Pick<VaultFolder, "_id" | "human_id">,
-  letter?: { letterFileId?: string | null; file: { type: string } },
+  letter?: { letterFileId?: string | null; file: { name: string; type: string } },
 ): Promise<boolean> {
   if (await canActAsProjectOwner(user._id, folder.human_id, folder._id)) return true;
   if (!letter?.letterFileId || !isLetterMedia(letter.file)) return false;

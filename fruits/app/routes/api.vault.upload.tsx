@@ -95,7 +95,7 @@ export async function action({ request }: ActionFunctionArgs) {
   // letter (`letterFileId`, the letter's id; `canUploadToFolder`): the
   // door a client has, since the Letters folder is otherwise a Guide's.
   const letterFileId = (form.get("letterFileId") as string | null) || null;
-  if (folder && !(await canUploadToFolder(user, folder, file instanceof File ? { letterFileId, file: { type: file.type } } : undefined))) {
+  if (folder && !(await canUploadToFolder(user, folder, file instanceof File ? { letterFileId, file: { name: file.name, type: file.type } } : undefined))) {
     return Response.json(
       { error: "You don't have permission to upload files here" },
       { status: 403 },

@@ -52,8 +52,8 @@ export function LetterSplitEditor({
    * read under the header while writing, since the chain (purpose,
    * brief, talk-through, outline, letter) lives on this page. */
   purpose?: string | null;
-  /** "Read it to them" in the toolbar: guides only, on a letter they can
-   * edit (`LetterRecorder`). */
+  /** "Read it to them" in the toolbar: for the letter's writer, a client
+   * on their own included, on a letter they can edit (`LetterRecorder`). */
   recordable?: boolean;
 }) {
   // The project's photos, fetched the first time the picker opens.

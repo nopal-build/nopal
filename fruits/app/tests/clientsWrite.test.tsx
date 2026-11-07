@@ -203,17 +203,25 @@ describe("the doors the rule stands behind", () => {
 
   it("the upload door: the letter's writer may put a picture or a video beside their letter, in the letter's folder and nowhere else; never a markdown file (a planted letter); a Guide as before", async () => {
     file("a1", { from_human_id: "clientA" });
-    const pic = { type: "image/png" };
-    const clip = { type: "video/webm" };
-    const md = { type: "text/markdown" };
+    const pic = { name: "roof.png", type: "image/png" };
+    const clip = { name: "read.webm", type: "video/webm" };
+    const md = { name: "letter.md", type: "text/markdown" };
     expect(await canUploadToFolder(person("clientA"), folders.letters as never, { letterFileId: "a1", file: pic })).toBe(true);
     expect(await canUploadToFolder(person("clientA"), folders.letters as never, { letterFileId: "a1", file: clip })).toBe(true);
     expect(await canUploadToFolder(person("clientA"), folders.letters as never, { letterFileId: "a1", file: md })).toBe(false);
-    expect(await canUploadToFolder(person("clientA"), folders.letters as never, { letterFileId: "a1", file: { type: "application/pdf" } })).toBe(false);
+    expect(await canUploadToFolder(person("clientA"), folders.letters as never, { letterFileId: "a1", file: { name: "costs.pdf", type: "application/pdf" } })).toBe(false);
+    // The type is the browser's word; the name is the file's. A letter
+    // named .md sent as a picture is a letter (the store files it by
+    // name); a HEIC the browser gives no type for is a picture.
+    expect(await canUploadToFolder(person("clientA"), folders.letters as never, { letterFileId: "a1", file: { name: "plant.md", type: "image/png" } })).toBe(false);
+    expect(await canUploadToFolder(person("clientA"), folders.letters as never, { letterFileId: "a1", file: { name: "IMG_0412.HEIC", type: "" } })).toBe(true);
+    expect(await canUploadToFolder(person("clientA"), folders.letters as never, { letterFileId: "a1", file: { name: "notes.txt", type: "" } })).toBe(false);
     expect(await canUploadToFolder(person("clientA"), folders.letters as never)).toBe(false);
     expect(await canUploadToFolder(person("clientA"), folders.photos as never, { letterFileId: "a1", file: pic })).toBe(false);
     expect(await canUploadToFolder(person("clientB"), folders.letters as never, { letterFileId: "a1", file: pic })).toBe(false);
     expect(await canUploadToFolder(person("guideA"), folders.letters as never, { file: md })).toBe(true);
+    // In the Vault's back room a guide gets a client's draft read-only: the editor follows the writer rule.
+    expect(app("routes/vault.tsx")).toContain("editable={canWriteCurrentFile && !!letterSend}");
     expect(await canUploadToFolder(person("crafter"), folders.letters as never, { letterFileId: "a1", file: pic })).toBe(false);
     // The recording the worker is pointed at must be the writer's own.
     expect(app("routes/api.letter.$fileId.recording.tsx")).toContain("!recording.s3_key?.startsWith(`vault/${got.user._id}/`)");

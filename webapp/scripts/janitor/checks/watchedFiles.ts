@@ -11,7 +11,10 @@ export interface WatchedFile {
   after: string | null;
 }
 
-/** The constant each seeded GraphLog skill lives in, and the file people know it as. */
+/** The constant each GraphLog skill lives in, and the file people know it
+ * as. The last two are defaults only, never seeded into a project
+ * (`GraphLogDefaultOnlyStage`), and watched the same: a change to what
+ * the model reads is what this reports. */
 export const RUNTIME_SKILL_FILE_NAMES: Record<string, string> = {
   DEFAULT_KNOWLEDGE_SKILL: "KNOWLEDGE.md",
   DEFAULT_FILING_SKILL: "FILING.md",
@@ -22,6 +25,8 @@ export const RUNTIME_SKILL_FILE_NAMES: Record<string, string> = {
   DEFAULT_SOW_SKILL: "SOW.md",
   DEFAULT_BRIEF_SKILL: "BRIEF.md",
   DEFAULT_OUTLINE_SKILL: "OUTLINE.md",
+  DEFAULT_OUTLINE_TALK_SKILL: "OUTLINE-TALK.md",
+  DEFAULT_OUTLINE_LETTER_BACK_SKILL: "OUTLINE-LETTER-BACK.md",
 };
 
 /**

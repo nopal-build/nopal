@@ -11,7 +11,8 @@ import { isImageRenditionSize, renditionContentType, renditionKey } from "robust
  *
  * `/api/vault/rendition/:id` for a letter's page: the same
  * worker-made rendition (or the original while there is none yet), gated
- * by `letterPageFile` (the link on, or on the project and sent). Never decodes anything;
+ * by `letterPageFile` (the link on, or on the project and sent), or for a
+ * draft's own files by `letterDraftFile` (the writer). Never decodes anything;
  * the web server never processes media (ADR-021). GET only.
  */
 export async function loader({ request, params }: LoaderFunctionArgs) {

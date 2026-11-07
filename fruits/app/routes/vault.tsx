@@ -3891,16 +3891,18 @@ export default function VaultV2Page() {
               // where the letters workflow leads; here it still opens
               // for a guide who goes looking, the same component with
               // the Vault's breadcrumb and Actions around it. The
-              // workings and the send are a manager's (the loader hands
-              // them to nobody else), and the public link while it is
-              // on (the switch itself is on the project's Letters tab).
+              // workings, the send and the editor itself are the letter's
+              // writer's (`resolveLetterForWriter` in the loader: a
+              // client's draft opens here read-only to a guide, since
+              // its save would be refused), and the public link while it
+              // is on (the switch itself is on the project's Letters tab).
               <LetterWriting
                 file={current.file}
                 projectFolderId={current.ancestry.find((f) => isProjectAnchor(f))?._id ?? null}
                 brief={letterBrief}
                 send={letterSend}
                 writer="guide"
-                editable={canWriteCurrentFile}
+                editable={canWriteCurrentFile && !!letterSend}
                 headerLeft={breadcrumbNode}
                 toolbarExtra={<MoreMenu label="Actions" items={splitEditorActions} trigger={actionsTrigger} />}
                 save={handleSaveWebsitePage}

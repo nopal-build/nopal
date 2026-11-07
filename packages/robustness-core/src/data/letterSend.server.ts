@@ -1,6 +1,7 @@
 /**
  * The send moment (Austin, 2026-10-27): a letter is a draft or sent. A
- * draft is read by guides only. Sending keeps a copy on the record
+ * draft is read by its writers only (the guides' house for theirs, a
+ * client alone for theirs). Sending keeps a copy on the record
  * (`FileRef.sent_*`, `letters.server.ts`'s `sentCopyOf`), which is what
  * the client reads on their project page; the guide keeps working in the
  * draft and nothing reaches the client until they send again, which

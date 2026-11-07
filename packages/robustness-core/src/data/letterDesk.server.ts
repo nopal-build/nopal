@@ -22,7 +22,7 @@
  * (`api.letter.$fileId.tsx`), the talk, outline, workings read,
  * dictation, recording and send routes (`letterForWriter`), the uploads
  * into the letter's folder (`canUploadToFolder`), and the letter's file
- * routes for a draft's pictures (`letterPageFile`'s writer branch). A
+ * routes for a draft's pictures (`letterDraftFile`). A
  * draft's words, its talk-through and its outline leave the server
  * through `letterWritingFor` only after the rule.
  *
