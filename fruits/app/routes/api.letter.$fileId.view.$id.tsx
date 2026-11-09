@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from "react-router";
 import { redirect } from "react-router";
-import { letterPageFile } from "robustness-core/data/letters.server";
+import { letterDraftFile, letterPageFile } from "robustness-core/data/letters.server";
 import { getUser } from "../modules/auth/auth.server";
 import { requestHasRenderPass } from "robustness-core/data/letterRenderPass.server";
 import { getPresignedViewUrl } from "robustness-core/data/file.server";
@@ -11,7 +11,9 @@ import { getPresignedViewUrl } from "robustness-core/data/file.server";
  * A file a letter's page names (`public.letter.$fileId.tsx`): served
  * while the letter's link is on, or to someone on the project once the
  * letter is sent, and only if the sent copy names the id
- * (`letterPageFile`).
+ * (`letterPageFile`); and a draft's own pictures to the letter's
+ * writer (`letterDraftFile`), for the editor's preview and the page
+ * before the send.
  * Same redirect to a short-lived presigned URL as the shared Efforts
  * page's file route. GET only.
  *
@@ -25,7 +27,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // the project and the letter sent.
   const viewer = fileId && id ? await getUser(request) : null;
   const rendering = fileId && id ? await requestHasRenderPass(request, fileId) : false;
-  const file = fileId && id ? await letterPageFile(fileId, id, viewer?._id ?? null, rendering) : null;
+  // A draft's files, to the letter's writer (`letterDraftFile`), after
+  // the page's doors say no.
+  const file = fileId && id ? ((await letterPageFile(fileId, id, viewer?._id ?? null, rendering)) ?? (viewer ? await letterDraftFile(fileId, id, viewer) : null)) : null;
   if (!file) return Response.json({ error: "Not found" }, { status: 404 });
   if (!file.s3_key) return Response.json({ error: "No viewable file attached" }, { status: 400 });
   return redirect(await getPresignedViewUrl(file.s3_key, 900, file.content_type));

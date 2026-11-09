@@ -98,6 +98,24 @@ app-native, not shared with `webapp` at all.
 - Keep edits consistent with existing formatting/indentation in the file you're
   editing rather than introducing a new style.
 
+## Behaviour conventions
+
+Stamps says what a control is and how it is drawn. The rules here say what
+happens to a person's words and actions when they use one, across the app.
+Each is held by an ADR (`docs/adr`) with its why and a test; read the ADR
+before changing the behaviour, and add a line here when a new rule of this
+kind is decided.
+
+- **Dictated words land where typing would** (ADR-032). Settled or not,
+  they appear in the entry or the box at the point the next words will go;
+  the dictate button draws only itself and a note when dictation stops.
+  Unsettled words are never saved. `app/components/DictateButton.tsx` and
+  `app/oxmarkdown/DictateButtonPlugin.tsx` hold it; a new dictated surface
+  uses `DictatedTextBox` or shows the words in place itself.
+- **Dictate where someone tells O.No what happened or thinks out loud;
+  type where they compose what a client receives** (Austin, 2026-11-02;
+  `DictateButton.tsx`'s header). A letter's body never gets the button.
+
 ## Validation
 
 - Run `npx tsc --noEmit -p .` (or `npm run typecheck`) from `fruits/` after

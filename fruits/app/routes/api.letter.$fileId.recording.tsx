@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
-import { letterForManager } from "../data/letterManager.server";
+import { letterForWriter } from "../data/letterWriter.server";
 import { getFileRefById } from "robustness-core/data/vault.server";
 import { enqueueLetterRecording, letterRecordingState } from "robustness-core/data/letterRecordingQueue.server";
 import type { FileRef } from "robustness-core/data/vault.types";
@@ -15,14 +15,16 @@ import type { FileRef } from "robustness-core/data/vault.types";
  * is going, so the outcome is on the page that asked (nobody reads the
  * worker's log). The recording becomes the letter's first block in the
  * editor, and so an unsent change, by the same autosave every edit
- * takes. Guides only (`letterForManager`); the recording must be a video
- * in the letter's own folder.
+ * takes. Whoever may write the letter (`letterForWriter`); the recording
+ * must be a video in the letter's own folder that they stored there
+ * themselves (every upload's key starts with the uploader's id), so a
+ * writer can't point the worker at someone else's file.
  */
 async function recordingFor(request: Request, fileId: string | undefined, recordingFileId: unknown): Promise<FileRef | Response> {
-  const got = await letterForManager(request, fileId);
+  const got = await letterForWriter(request, fileId);
   if (got instanceof Response) return got;
   const recording = typeof recordingFileId === "string" && recordingFileId ? await getFileRefById(recordingFileId) : null;
-  if (!recording || recording.archived_at || recording.folder_id !== got.file.folder_id || !recording.content_type.startsWith("video/")) {
+  if (!recording || recording.archived_at || recording.folder_id !== got.file.folder_id || !recording.content_type.startsWith("video/") || !recording.s3_key?.startsWith(`vault/${got.user._id}/`)) {
     return Response.json({ error: "That recording isn't beside this letter" }, { status: 404 });
   }
   return recording;

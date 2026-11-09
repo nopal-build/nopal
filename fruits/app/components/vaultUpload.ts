@@ -18,7 +18,14 @@ async function errorOf(res: Response, fallback: string): Promise<Error> {
  * carries the same `source`/`date` locking convention
  * `api.daily-log.upload.tsx` used to set itself (`isFileRefLocked`) --
  * meaningless (and server-validated) for any other caller. */
-export type VaultUploadMeta = { source?: "daily_log"; date?: string };
+export type VaultUploadMeta = {
+  source?: "daily_log";
+  date?: string;
+  /** A letter's writer putting a picture or recording beside their
+   * letter: the letter's id opens the Letters folder to them
+   * (`canUploadToFolder`), which is a Guide's otherwise. */
+  letterFileId?: string;
+};
 
 /** Stores the file in the folder and returns its file id. `onProgress`
  * gets 0 to 1. Holds a screen wake lock for the duration (`wakeLock.ts`)
@@ -37,6 +44,7 @@ async function uploadToVaultFolderInner(file: File, folderId: string, onProgress
     form.append("folderId", folderId);
     if (meta.source) form.append("source", meta.source);
     if (meta.date) form.append("date", meta.date);
+    if (meta.letterFileId) form.append("letterFileId", meta.letterFileId);
     const res = await fetch("/api/vault/upload", { method: "POST", body: form });
     if (!res.ok) throw await errorOf(res, `The upload failed (${res.status}).`);
     const data = (await res.json().catch(() => null)) as { fileRef?: { _id?: string } } | null;
@@ -48,7 +56,7 @@ async function uploadToVaultFolderInner(file: File, folderId: string, onProgress
   const init = await fetch("/api/vault/multipart-init", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename: file.name, contentType, folderId, originalName: file.name, size: file.size }),
+    body: JSON.stringify({ filename: file.name, contentType, folderId, originalName: file.name, size: file.size, letterFileId: meta.letterFileId }),
   });
   if (!init.ok) throw await errorOf(init, `The upload didn't start (${init.status}).`);
   const { uploadId, key } = (await init.json()) as { uploadId: string; key: string };

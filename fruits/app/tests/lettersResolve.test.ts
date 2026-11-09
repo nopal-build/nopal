@@ -4,7 +4,7 @@
  * folder, or a trashed project, is nothing; and only the ids the sent
  * copy names are served. Since 2026-10-28 a second door: someone on the
  * project, logged in, once the letter is sent
- * (`resolveSentLetterForMember`); and a letter whose link was on before
+ * (`resolveSentLetterForHouse`); and a letter whose link was on before
  * letters had a send gets its sent copy written down on first read
  * (`ensureSentCopy`). The vault reads and the one write are stubbed;
  * the rules are what is under test.
@@ -62,7 +62,7 @@ vi.mock("robustness-core/data/generic.server", async (importOriginal) => {
   };
 });
 
-const { letterPageFile, resolveReadableLetter, resolveSentLetterForMember, resolveSharedLetter } = await import("robustness-core/data/letters.server");
+const { letterPageFile, resolveReadableLetter, resolveSentLetterForHouse, resolveSharedLetter } = await import("robustness-core/data/letters.server");
 const { enqueueLetterPdfIfSent } = await import("robustness-core/data/letterPdf.server");
 
 describe("resolveSharedLetter", () => {
@@ -123,10 +123,10 @@ describe("resolveReadableLetter (2026-10-29)", () => {
 
 describe("the member's door (2026-10-28)", () => {
   it("opens for someone on the project once the letter is sent, and for nobody on a draft", async () => {
-    expect((await resolveSentLetterForMember("sent1", "client1"))?.file._id).toBe("sent1");
-    expect(await resolveSentLetterForMember("sent1", "stranger")).toBeNull();
-    expect(await resolveSentLetterForMember("off1", "client1")).toBeNull();
-    expect(await resolveSentLetterForMember("gone1", "client1")).toBeNull();
+    expect((await resolveSentLetterForHouse("sent1", "client1"))?.file._id).toBe("sent1");
+    expect(await resolveSentLetterForHouse("sent1", "stranger")).toBeNull();
+    expect(await resolveSentLetterForHouse("off1", "client1")).toBeNull();
+    expect(await resolveSentLetterForHouse("gone1", "client1")).toBeNull();
   });
 
   it("a letter whose link was on before letters had a send gets its live content written down as the sent copy, once", async () => {
@@ -138,7 +138,7 @@ describe("the member's door (2026-10-28)", () => {
     expect(merged[0]).toMatchObject({ table: "file_refs", id: "shared1", data: { sent_at: "2026-10-21T09:00:00Z", sent_date: "2026-10-21", sent_count: 1, sent_by_human_id: null } });
     // Already sent: nothing written.
     merged.length = 0;
-    await resolveSentLetterForMember("sent1", "client1");
+    await resolveSentLetterForHouse("sent1", "client1");
     expect(merged).toHaveLength(0);
   });
 });
