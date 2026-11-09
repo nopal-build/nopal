@@ -124,7 +124,7 @@ function PayForm({ amount, returnUrl }: { amount: string; returnUrl: string }) {
 const DONE: Record<string, string> = {
   paid: "Paid. Thank you. A receipt is on its way to your email.",
   processing: "Got it. Bank transfers take a few business days to clear, and you'll get a receipt by email when it does.",
-  canceled: "This bill was withdrawn, so there's nothing to pay.",
+  canceled: "This payment was removed, so there's nothing to pay.",
 };
 
 export default function Pay() {

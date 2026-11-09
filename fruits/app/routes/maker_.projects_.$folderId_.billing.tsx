@@ -149,7 +149,7 @@ export async function action({ request, params }: ActionFunctionArgs): Promise<B
     try {
       await cancelCharge(charge);
     } catch (err) {
-      return { error: err instanceof Error ? err.message : "Couldn't withdraw it." };
+      return { error: err instanceof Error ? err.message : "Couldn't remove it." };
     }
     return { ok: true };
   }

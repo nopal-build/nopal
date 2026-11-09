@@ -3,7 +3,12 @@
 // stands. The guide's one place to act on a project's billing; the
 // Maker's Payments page only lists, and links here. Posts to
 // `/maker/projects/:id/billing`.
-import { useState, type ReactNode } from "react";
+//
+// Seeing is the default and changing is deliberate (Austin and Gerald,
+// 2026-11-09): the plan and the bills show read only, and "Change plan"
+// and "Bill once" each open a popup. Both need a Client on the project;
+// without one neither shows (the billing route refuses it too).
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useFetcher } from "react-router";
 import type { BillingActionResult } from "../routes/maker_.projects_.$folderId_.billing";
 import type { PlanView } from "../data/billingNotices.server";
@@ -12,6 +17,7 @@ import { Checkbox } from "stamps/Checkbox";
 import { Cluster } from "stamps/Cluster";
 import { CopyField } from "stamps/CopyField";
 import { Input } from "stamps/Input";
+import { Modal } from "stamps/Modal";
 import { Select } from "stamps/Select";
 import { Stack } from "stamps/Stack";
 import { Badge } from "stamps/Badge";
@@ -44,7 +50,7 @@ export const CHARGE_STATUS_LABEL: Record<ChargeStatusView, string> = {
   processing: "Paying (bank transfer clears in a few days)",
   paid: "Paid",
   failed: "Payment failed",
-  canceled: "Withdrawn",
+  canceled: "Removed",
 };
 
 function Notice({ tone, children }: { tone: "danger" | "subtle"; children: ReactNode }) {
@@ -146,11 +152,14 @@ function BillThisProject({
   kinds,
   typedKinds,
   hasClients,
+  onSent,
 }: {
   action: string;
   kinds: PricedOption[];
   typedKinds: string[];
   hasClients: boolean;
+  /** A send went through: the popup closes and the page says so. */
+  onSent: (message: string) => void;
 }) {
   const fetcher = useFetcher<BillingActionResult>();
   const [kind, setKind] = useState("custom");
@@ -158,11 +167,13 @@ function BillThisProject({
   const priced = kinds.find((k) => k.value === kind)?.cents ?? null;
   const busy = fetcher.state !== "idle";
   const result = fetcher.state === "idle" ? fetcher.data : undefined;
+  useEffect(() => {
+    if (result && "ok" in result) onSent(result.message ?? "Sent.");
+  }, [result, onSent]);
   return (
     <fetcher.Form method="post" action={action}>
       <input type="hidden" name="intent" value="bill" />
       <Stack gap={3}>
-        <h3 className={`${textSize.base} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>Bill this project</h3>
         <Select label="For" name="kind" options={kinds} value={kind} onChange={(e) => setKind(e.target.value)} required />
         {typedKinds.includes(kind) ? (
           <Input label="Amount (dollars)" name="amount" placeholder="1000" required />
@@ -171,9 +182,7 @@ function BillThisProject({
         )}
         <Input label="What it's for, as the client will see it" name="note" placeholder="Attic beam sizing, with a letter" required />
         <AttachFiles action={action} />
-        {!hasClients && <Notice tone="subtle">Nobody on this project is a Client yet. Add one above to send a bill.</Notice>}
         {result && "error" in result && <Notice tone="danger">{result.error}</Notice>}
-        {result && "ok" in result && result.message && <Notice tone="subtle">{result.message}</Notice>}
         <Cluster gap={3}>
           <button type="submit" className={button({ variant: "secondary" })} disabled={busy || !hasClients}>
             {busy ? "Sending…" : "Send"}
@@ -235,7 +244,24 @@ function GuidePlanControls({ plan, action }: { plan: PlanView; action: string })
   );
 }
 
-function PlanPicker({
+/** The plan as it stands, read only: the page is for seeing a project's
+ * billing, and every change goes through a deliberate popup (Austin and
+ * Gerald, 2026-11-09). The line carries the renewal date. */
+function PlanSummary({ plan }: { plan: PlanView }) {
+  return (
+    <Stack gap={2}>
+      <Cluster gap={3} align="baseline">
+        <h3 className={`${textSize.base} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>Plan</h3>
+        {plan.onHold && <Badge>Work on hold</Badge>}
+      </Cluster>
+      <Notice tone="subtle">{plan.line}</Notice>
+    </Stack>
+  );
+}
+
+/** Inside the "Change plan" popup: the level and billing day, plus the
+ * pause, end and resume controls, which are plan changes too. */
+function PlanForm({
   action,
   plan,
   levels,
@@ -256,10 +282,6 @@ function PlanPicker({
   const notStarted = plan.status === "none" || plan.status === "canceled" || plan.awaitingSetup;
   return (
     <Stack gap={3}>
-      <Cluster gap={3} align="baseline">
-        <h3 className={`${textSize.base} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>Plan</h3>
-        {plan.onHold && <Badge>Work on hold</Badge>}
-      </Cluster>
       <Notice tone="subtle">{plan.line}</Notice>
       {(plan.canApproveResume || plan.canResumeNow) && (
         <Cluster gap={3} align="center">
@@ -309,6 +331,7 @@ function PlanPicker({
 
 function ChargeRow({ charge, action }: { charge: ProjectChargeView; action: string }) {
   const fetcher = useFetcher<BillingActionResult>();
+  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
   const error = fetcher.data && "error" in fetcher.data ? fetcher.data.error : null;
   const unpaid = charge.status === "open" || charge.status === "failed";
   return (
@@ -336,14 +359,26 @@ function ChargeRow({ charge, action }: { charge: ProjectChargeView; action: stri
       {unpaid && (
         <Cluster gap={3} align="center">
           <CopyField value={charge.payLink} ariaLabel={`Pay link for ${charge.label}`} copyLabel="Copy link" />
-          <button
-            type="button"
-            className={`${link} ${textSize.xs}`}
-            disabled={fetcher.state !== "idle"}
-            onClick={() => fetcher.submit({ intent: "withdraw", chargeId: charge.id }, { method: "post", action })}
-          >
-            Withdraw
-          </button>
+          {confirmWithdraw ? (
+            <>
+              <span className={textSize.xs}>Remove this payment? Its pay link stops working.</span>
+              <button
+                type="button"
+                className={`${link} ${textSize.xs}`}
+                disabled={fetcher.state !== "idle"}
+                onClick={() => fetcher.submit({ intent: "withdraw", chargeId: charge.id }, { method: "post", action })}
+              >
+                Remove it
+              </button>
+              <button type="button" className={`${link} ${textSize.xs}`} onClick={() => setConfirmWithdraw(false)}>
+                Keep it
+              </button>
+            </>
+          ) : (
+            <button type="button" className={`${link} ${textSize.xs}`} onClick={() => setConfirmWithdraw(true)}>
+              Remove this payment
+            </button>
+          )}
         </Cluster>
       )}
       {error && <Notice tone="danger">{error}</Notice>}
@@ -371,6 +406,14 @@ export function ProjectPayments({
   levels: PricedOption[];
 }) {
   const action = `/maker/projects/${projectId}/billing`;
+  const [open, setOpen] = useState<"plan" | "bill" | null>(null);
+  const [sent, setSent] = useState<string | null>(null);
+  const close = () => setOpen(null);
+  const onSent = useCallback((message: string) => {
+    setSent(message);
+    setOpen(null);
+  }, []);
+  const hasPlan = !(plan.status === "none" || plan.status === "canceled");
   return (
     <Stack gap={5}>
       <h2 className={`${textSize.lg} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>Payments</h2>
@@ -378,12 +421,39 @@ export function ProjectPayments({
         <Notice tone="subtle">Stripe isn't set up on this server yet.</Notice>
       ) : (
         <>
-          <PlanPicker action={action} plan={plan} levels={levels} hasClients={hasClients} />
-          <BillThisProject action={action} kinds={kinds} typedKinds={typedKinds} hasClients={hasClients} />
+          <PlanSummary plan={plan} />
+          {/* Payments need someone to pay: with no Client, nothing to act on. */}
+          {hasClients ? (
+            <Cluster gap={3}>
+              <button type="button" className={button({ variant: "secondary" })} onClick={() => setOpen("plan")}>
+                {hasPlan ? "Change plan" : "Set plan"}
+              </button>
+              <button
+                type="button"
+                className={button({ variant: "secondary" })}
+                onClick={() => {
+                  setSent(null);
+                  setOpen("bill");
+                }}
+              >
+                Bill once
+              </button>
+            </Cluster>
+          ) : (
+            <Notice tone="subtle">Add a Client to this project to set a plan or send a bill.</Notice>
+          )}
+          {sent && <Notice tone="subtle">{sent}</Notice>}
+          <Modal open={open === "plan"} onClose={close} title={hasPlan ? "Change plan" : "Set plan"} maxWidth={520}>
+            <PlanForm action={action} plan={plan} levels={levels} hasClients={hasClients} />
+          </Modal>
+          <Modal open={open === "bill"} onClose={close} title="Bill once" maxWidth={520}>
+            <BillThisProject action={action} kinds={kinds} typedKinds={typedKinds} hasClients={hasClients} onSent={onSent} />
+          </Modal>
         </>
       )}
       {charges.length > 0 && (
         <Stack gap={4}>
+          <h3 className={`${textSize.base} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>Bills</h3>
           {charges.map((c) => (
             <ChargeRow key={c.id} charge={c} action={action} />
           ))}

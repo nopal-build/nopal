@@ -34,7 +34,7 @@ const STATUS: Record<ProfileCharge["status"], string> = {
   processing: "Clearing",
   paid: "Paid",
   failed: "Didn't go through",
-  canceled: "Withdrawn",
+  canceled: "Removed",
 };
 
 function PlanCard({ plan, levels }: { plan: ProfilePlan; levels: { value: string; label: string }[] }) {

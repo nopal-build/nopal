@@ -194,7 +194,7 @@ export function isPayable(charge: Pick<BillingCharge, "status">): boolean {
 
 /** Withdraw a bill nobody has paid. Refused once money is moving. */
 export async function cancelCharge(charge: BillingCharge): Promise<void> {
-  if (!isPayable(charge)) throw new Error("Only an unpaid bill can be withdrawn");
+  if (!isPayable(charge)) throw new Error("Only an unpaid payment can be removed");
   for (const piId of Object.values(charge.payment_intents ?? {})) {
     const pi = await stripe().paymentIntents.retrieve(piId);
     if (pi.status === "processing" || pi.status === "succeeded") {
