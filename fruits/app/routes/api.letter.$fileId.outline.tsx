@@ -1,5 +1,5 @@
 import type { ActionFunctionArgs } from "react-router";
-import { letterForManager } from "../data/letterManager.server";
+import { letterForWriter } from "../data/letterWriter.server";
 import { requestOutline, saveOutlineEdit } from "robustness-core/data/outline.server";
 
 /**
@@ -8,12 +8,13 @@ import { requestOutline, saveOutlineEdit } from "robustness-core/data/outline.se
  * PUT  /api/letter/:fileId/outline  { content }   the guide's own edit; it
  *                                                 re-runs nothing
  *
- * Guides only (`letterForManager`). The outline is read with the rest of
+ * Whoever may write the letter (`letterForWriter`: a guide, or a client
+ * on their own). The outline is read with the rest of
  * the letter's workings on `GET /api/letter/:fileId/brief`.
  */
 export async function action({ request, params }: ActionFunctionArgs) {
   if (request.method !== "POST" && request.method !== "PUT") return Response.json({ error: "Method not allowed" }, { status: 405 });
-  const got = await letterForManager(request, params.fileId);
+  const got = await letterForWriter(request, params.fileId);
   if (got instanceof Response) return got;
 
   if (request.method === "PUT") {

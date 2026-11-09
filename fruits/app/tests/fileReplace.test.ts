@@ -13,11 +13,16 @@ const allowed: ReplaceFacts = {
   folderWritable: true,
   writeRefusal: "",
   locked: false,
+  letter: null,
 };
 
 describe("replaceRefusalFor", () => {
   it("allows the owner of an unlocked, writable file", () => {
     expect(replaceRefusalFor(allowed)).toBeNull();
+  });
+
+  it("refuses a letter that is not the actor's to change, whoever owns the folder (a client's draft, a guide in the Vault; 2026-11-06)", () => {
+    expect(replaceRefusalFor({ ...allowed, letter: { status: 403, error: "This letter isn't yours to change." } })).toEqual({ status: 403, error: "This letter isn't yours to change." });
   });
 
   it("refuses someone who is neither owner nor owner-tier on the project", () => {

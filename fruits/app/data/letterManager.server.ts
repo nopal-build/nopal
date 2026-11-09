@@ -1,9 +1,8 @@
-// The one gate for a letter's workings (the brief, the talk-through, the
-// outline): a Guide on the project, or staff (`canManageLetters`), and
-// the letter itself. Anyone else gets the 404 of a letter that isn't
-// there, a Client, Crafter and Observer included. Shared by the
-// `api.letter.$fileId.{brief,talk,outline}` routes so the rule is in one
-// place.
+// The manager's gate from a route: a Guide on the project, or staff
+// (`canManageLetters`), and the letter itself. Anyone else gets the 404
+// of a letter that isn't there. Since 2026-11-06 only writing the brief
+// (`api.letter.$fileId.brief.tsx`'s POST) asks it; the talk, the
+// outline and the rest ask the writer's gate (`letterWriter.server.ts`).
 import { getUserFromRequest } from "../modules/auth/auth.server";
 import { getFileRefById } from "robustness-core/data/vault.server";
 import { getProjectRole, type ResolvedProjectRole } from "robustness-core/data/projectSharing.server";

@@ -19,10 +19,18 @@ import { renderToStaticMarkup } from "react-dom/server";
 import OxRenderer from "../components/OxRenderer";
 import { buildWebsiteDirectiveRegistry } from "../oxmarkdown/websiteDirectives";
 import {
+  CAMERA_FAILED,
+  MEDIA_DENIED,
+  MIC_FAILED,
   RECORDING_MINUTES_LIMIT,
-  faceCircle,
+  deviceOptions,
+  PAD_ASPECT,
+  facePad,
+  padCrop,
   leadingRecordingId,
   letterHasText,
+  micLevel,
+  openMedia,
   pickRecorderMimeType,
   recordingBlock,
   recordingFile,
@@ -105,12 +113,22 @@ describe("the browser's half", () => {
     expect(recordingFile(new Blob(["x"]), "video/mp4;codecs=avc1,mp4a", "2026-10-29").name).toBe("read-aloud-2026-10-29.mp4");
   });
 
-  it("draws the face in a circle in the bottom right, inside the frame", () => {
-    const { cx, cy, r } = faceCircle(1920, 1080);
-    expect(cx + r).toBeLessThan(1920);
-    expect(cy + r).toBeLessThan(1080);
-    expect(cx).toBeGreaterThan(1920 * 0.75);
-    expect(cy).toBeGreaterThan(1080 * 0.6);
+  it("draws the face in the pad in the bottom right, inside the frame", () => {
+    const { x, y, w, h } = facePad(1920, 1080);
+    expect(x + w).toBeLessThan(1920);
+    expect(y + h).toBeLessThan(1080);
+    expect(x).toBeGreaterThan(1920 * 0.75);
+    expect(y).toBeGreaterThan(1080 * 0.5);
+    expect(h).toBeGreaterThan(w);
+    expect(w / h).toBeCloseTo(PAD_ASPECT, 1);
+  });
+
+  it("cuts the camera's middle to the pad's shape", () => {
+    const crop = padCrop(1280, 720);
+    expect(crop.sh).toBe(720);
+    expect(crop.sw / crop.sh).toBeCloseTo(PAD_ASPECT, 4);
+    expect(crop.sx).toBeCloseTo((1280 - crop.sw) / 2, 4);
+    expect(crop.sy).toBe(0);
   });
 
   it("has a limit in minutes", () => {
@@ -119,19 +137,22 @@ describe("the browser's half", () => {
   });
 
   it("is offered to a guide on a letter they can edit, and lands through the editor's own autosave", () => {
-    const vault = readFileSyncText(path.join(here, "../routes/vault.tsx"));
-    expect(vault).toContain("recordable={!!letterSend}");
-    expect(vault).toContain("recordable && editable && folderId");
-    expect(vault).toContain("updateBody((prev) => setLeadingRecording(prev, recordingFileId))");
+    // The editor was lifted out of the Vault's file on 2026-11-06 so the desk can mount it; the lines are the same.
+    const writing = readFileSyncText(path.join(here, "../components/LetterWriting.tsx"));
+    const letterEditor = readFileSyncText(path.join(here, "../components/LetterSplitEditor.tsx"));
+    const splitEditor = readFileSyncText(path.join(here, "../components/MarkdownSplitEditor.tsx"));
+    expect(writing).toContain("recordable={!!send}");
+    expect(letterEditor).toContain("recordable && editable && folderId");
+    expect(letterEditor).toContain("updateBody((prev) => setLeadingRecording(prev, recordingFileId))");
     // The picker stays images-only; the recording arrives only through the control.
-    expect(vault).toContain('candidates.filter((f) => f.type.startsWith("image/"))');
+    expect(splitEditor).toContain('candidates.filter((f) => f.type.startsWith("image/"))');
   });
 });
 
 describe("the worker's half", () => {
-  it("asks only for a guide, and only for a video beside the letter", () => {
+  it("asks only for the letter's writer (a guide, or a client on their own), and only for a video beside the letter", () => {
     const route = readFileSyncText(path.join(here, "../routes/api.letter.$fileId.recording.tsx"));
-    expect(route).toContain("letterForManager(request, fileId)");
+    expect(route).toContain("letterForWriter(request, fileId)");
     expect(route).toContain("recording.folder_id !== got.file.folder_id");
     expect(route).toContain('recording.content_type.startsWith("video/")');
     expect(route).not.toMatch(/ffmpeg|letterRecording\.server"/);
@@ -201,3 +222,62 @@ describe("the worker's half", () => {
 function readFileSyncText(file: string): string {
   return readFileSync(file, "utf8");
 }
+
+describe("picking the camera and mic (2026-11-03)", () => {
+  it("lists each kind, named once the browser allows it, numbered before", () => {
+    const listed = [
+      { deviceId: "c1", kind: "videoinput", label: "FaceTime HD Camera" },
+      { deviceId: "m1", kind: "audioinput", label: "" },
+      { deviceId: "m2", kind: "audioinput", label: "" },
+      { deviceId: "", kind: "audioinput", label: "" },
+    ] as never;
+    expect(deviceOptions(listed, "videoinput")).toEqual([{ value: "c1", label: "FaceTime HD Camera" }]);
+    expect(deviceOptions(listed, "audioinput").map((o) => o.label)).toEqual(["Microphone 1", "Microphone 2"]);
+  });
+  it("shows a device listed twice under one name once", () => {
+    const listed = [
+      { deviceId: "m1", kind: "audioinput", label: "Mac System Default" },
+      { deviceId: "m2", kind: "audioinput", label: "Austin's phone Microphone" },
+      { deviceId: "m3", kind: "audioinput", label: "Mac System Default" },
+    ] as never;
+    expect(deviceOptions(listed, "audioinput")).toEqual([
+      { value: "m1", label: "Mac System Default" },
+      { value: "m2", label: "Austin's phone Microphone" },
+    ]);
+  });
+  it("falls back to voice only when the camera won't open, and says which failed", async () => {
+    const stream = { id: "voice" } as unknown as MediaStream;
+    const asks: MediaStreamConstraints[] = [];
+    const cameraBroken = async (c: MediaStreamConstraints) => {
+      asks.push(c);
+      if (c.video) throw new DOMException("no camera", "NotFoundError");
+      return stream;
+    };
+    expect(await openMedia(cameraBroken, true, { width: { ideal: 640 } })).toEqual({ stream, voiceOnly: true, error: CAMERA_FAILED });
+    expect(asks.map((a) => !!a.video)).toEqual([true, false]);
+
+    const micBroken = async () => {
+      throw new DOMException("busy", "NotReadableError");
+    };
+    expect(await openMedia(micBroken, true, { width: { ideal: 640 } })).toEqual({ stream: null, voiceOnly: true, error: MIC_FAILED });
+    expect(await openMedia(micBroken, true, false)).toEqual({ stream: null, voiceOnly: true, error: MIC_FAILED });
+  });
+  it("names a refusal as the browser's, and leaves a missing remembered device to the caller", async () => {
+    const refused = async () => {
+      throw new DOMException("no", "NotAllowedError");
+    };
+    expect((await openMedia(refused, true, { width: { ideal: 640 } })).error).toBe(MEDIA_DENIED);
+    const gone = async () => {
+      throw new DOMException("gone", "OverconstrainedError");
+    };
+    await expect(openMedia(gone, true, false)).rejects.toThrow("gone");
+  });
+  it("reads silence as nothing and a loud signal as full", () => {
+    expect(micLevel(new Uint8Array(64).fill(128))).toBe(0);
+    expect(micLevel(Uint8Array.from({ length: 64 }, (_, i) => (i % 2 ? 255 : 0)))).toBe(1);
+  });
+  it("hands the previewed stream to the recording, not a second ask", () => {
+    const src = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../components/LetterRecorder.tsx"), "utf8");
+    expect(src).toMatch(/const user =\s*previewRef\.current \?\?/);
+  });
+});

@@ -66,16 +66,95 @@ export function recordingFile(blob: Blob, mimeType: string, day: string): File {
   return new File([blob], `read-aloud-${day}.${ext}`, { type });
 }
 
-/** Where the face sits: a circle in the bottom right, sized to the
+/** The face's frame: a circle nudged toward the green pad from the "no."
+ * logo (as in `CactusProgress`), its full end down. Austin, 2026-11-04: a
+ * subtle departure from a circle, organic, fuller at the bottom than the
+ * top and not symmetrical. It's the pad's broad outline (its first three
+ * harmonics) weighted to keep the lopsidedness and drop most of the
+ * stretch, in a 0 to 1 box. One path serves the screen (an SVG clip in
+ * box units) and the recording (scaled onto the canvas). */
+export const PAD_UNIT_PATH =
+  "M0.9947 0.4614C0.9992 0.5002 1.0019 0.5403 0.9984 0.5810C0.9950 0.6217 0.9885 0.6650 0.9740 0.7057C0.9596 0.7463 0.9391 0.7890 0.9116 0.8251C0.8840 0.8613 0.8482 0.8964 0.8089 0.9227C0.7695 0.9490 0.7223 0.9702 0.6755 0.9831C0.6287 0.9959 0.5769 1.0011 0.5281 0.9998C0.4794 0.9986 0.4292 0.9894 0.3829 0.9756C0.3367 0.9618 0.2914 0.9414 0.2507 0.9173C0.2101 0.8931 0.1715 0.8635 0.1389 0.8307C0.1063 0.7979 0.0769 0.7600 0.0551 0.7205C0.0333 0.6810 0.0166 0.6369 0.0079 0.5937C-0.0008 0.5505 -0.0021 0.5042 0.0029 0.4614C0.0080 0.4187 0.0213 0.3756 0.0382 0.3369C0.0551 0.2982 0.0790 0.2619 0.1044 0.2294C0.1299 0.1968 0.1598 0.1677 0.1909 0.1416C0.2221 0.1154 0.2558 0.0921 0.2914 0.0724C0.3269 0.0527 0.3649 0.0352 0.4044 0.0232C0.4438 0.0112 0.4864 0.0022 0.5281 0.0004C0.5699 -0.0013 0.6144 0.0022 0.6550 0.0124C0.6955 0.0227 0.7364 0.0403 0.7713 0.0619C0.8062 0.0836 0.8381 0.1124 0.8645 0.1423C0.8910 0.1722 0.9122 0.2069 0.9300 0.2413C0.9479 0.2757 0.9608 0.3120 0.9716 0.3487C0.9824 0.3854 0.9902 0.4227 0.9947 0.4614Z";
+/** The pad's width over its height. */
+export const PAD_ASPECT = 0.9486;
+
+/** Where the face sits: the pad in the bottom right, sized to the
  * frame. Pure, so the layout is one test. */
-export function faceCircle(width: number, height: number): { cx: number; cy: number; r: number } {
-  const r = Math.round(Math.min(width, height) * 0.12);
+export function facePad(width: number, height: number): { x: number; y: number; w: number; h: number } {
+  const h = Math.round(Math.min(width, height) * 0.25);
+  const w = Math.round(h * PAD_ASPECT);
   const margin = Math.round(Math.min(width, height) * 0.04);
-  return { cx: width - margin - r, cy: height - margin - r, r };
+  return { x: width - margin - w, y: height - margin - h, w, h };
+}
+
+/** The middle of a camera frame cut to the pad's shape, as a source
+ * rectangle to draw from. */
+export function padCrop(videoWidth: number, videoHeight: number): { sx: number; sy: number; sw: number; sh: number } {
+  const sw = Math.min(videoWidth, videoHeight * PAD_ASPECT);
+  const sh = sw / PAD_ASPECT;
+  return { sx: (videoWidth - sw) / 2, sy: (videoHeight - sh) / 2, sw, sh };
 }
 
 /** `m:ss`. */
 export function clock(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** The cameras or mics the browser lists, as picker options (Austin,
+ * 2026-11-03: pick the camera and mic, and see them, before recording).
+ * A browser hides names until it's been allowed the devices once; then
+ * they're numbered. */
+export function deviceOptions(devices: Pick<MediaDeviceInfo, "deviceId" | "kind" | "label">[], kind: "videoinput" | "audioinput"): { value: string; label: string }[] {
+  const noun = kind === "videoinput" ? "Camera" : "Microphone";
+  // A device listed twice under one name (a virtual machine's bridge can
+  // leave old copies) shows once: the first, which the browser lists live.
+  const seen = new Set<string>();
+  return devices
+    .filter((d) => d.kind === kind && d.deviceId)
+    .map((d, i) => ({ value: d.deviceId, label: d.label || `${noun} ${i + 1}` }))
+    .filter((o) => !seen.has(o.label) && !!seen.add(o.label));
+}
+
+export const MEDIA_DENIED = "The browser wasn't allowed the camera or microphone. Allow them in the address bar, then try again.";
+export const CAMERA_FAILED = "The camera didn't open, so this records voice only.";
+export const MIC_FAILED = "The microphone didn't open.";
+
+/** What opening the camera and mic came to: the stream to preview and
+ * record, whether it has no camera, and what to tell the guide. */
+export type MediaOpened = { stream: MediaStream | null; voiceOnly: boolean; error: string | null };
+
+function deniedError(err: unknown): boolean {
+  return err instanceof DOMException && (err.name === "NotAllowedError" || err.name === "SecurityError");
+}
+
+/** Opens the camera and mic together, and when that fails for a reason
+ * other than permission, tries the mic alone: a missing, broken or busy
+ * camera still leaves voice. A remembered device that's gone
+ * (`OverconstrainedError`) is thrown for the caller to retry on defaults. */
+export async function openMedia(
+  getUserMedia: (c: MediaStreamConstraints) => Promise<MediaStream>,
+  audio: MediaTrackConstraints | true,
+  video: MediaTrackConstraints | false,
+): Promise<MediaOpened> {
+  try {
+    return { stream: await getUserMedia({ audio, video }), voiceOnly: !video, error: null };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "OverconstrainedError") throw err;
+    if (deniedError(err)) return { stream: null, voiceOnly: !video, error: MEDIA_DENIED };
+    if (!video) return { stream: null, voiceOnly: true, error: MIC_FAILED };
+  }
+  try {
+    return { stream: await getUserMedia({ audio, video: false }), voiceOnly: true, error: CAMERA_FAILED };
+  } catch (err) {
+    return { stream: null, voiceOnly: true, error: deniedError(err) ? MEDIA_DENIED : MIC_FAILED };
+  }
+}
+
+/** How loud the mic is, 0 to 1, from an analyser's time-domain samples
+ * (128 is silence): enough to see it's hearing you. */
+export function micLevel(samples: Uint8Array): number {
+  let sum = 0;
+  for (const v of samples) sum += ((v - 128) / 128) ** 2;
+  return Math.min(1, Math.sqrt(sum / Math.max(1, samples.length)) * 4);
 }

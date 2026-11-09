@@ -2,7 +2,8 @@ import type { ActionFunctionArgs } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
 import { buildDictationContext, type TermsProject } from "../modules/dictationTerms";
 import { peopleOnMany } from "../data/projectPeople.server";
-import { letterForManager } from "../data/letterManager.server";
+import { letterForWriter } from "../data/letterWriter.server";
+import { letterForReader } from "../data/letterReader.server";
 import { getDailyLogCards } from "robustness-core/data/dailyLog.server";
 import { getFolderById } from "robustness-core/data/vault.server";
 import { getProjectRole, getProjectSharing, listProjectsFor } from "robustness-core/data/projectSharing.server";
@@ -12,7 +13,7 @@ import { signTicket } from "../../dictation/ticket.js";
 
 /**
  * POST /api/dictation/start
- * Body (JSON): { date, cardFile? } or { letterFile }
+ * Body (JSON): { date, cardFile? } or { letterFile } or { reflectOn }
  * Returns: { ticket }
  *
  * The dictate button's first step (record-in-daily-log seed). The socket
@@ -27,18 +28,28 @@ import { signTicket } from "../../dictation/ticket.js";
  * In the day's own prose: the projects of that day's Cards, or every
  * project the person is on when there are none yet.
  *
- * For a letter's brief (`letterFile`, the letter's file id): only who may
- * manage that letter (`letterForManager`, the talk-through route's own
+ * For a letter's talk box (`letterFile`, the letter's file id): only who
+ * may write that letter (`letterForWriter`, the talk-through route's own
  * check), with the letter's project's terms.
+ *
+ * For a reader's talk-through of a letter (`reflectOn`, the letter's
+ * file id): only who that sent letter is shown to (`letterForReader`,
+ * the reflection route's own check), with the same terms.
  */
 export async function action({ request }: ActionFunctionArgs) {
   const user = await getUser(request);
   if (!user) return Response.json({ error: "Not authenticated" }, { status: 401 });
 
-  const body = (await request.json().catch(() => ({}))) as { date?: string; cardFile?: string; letterFile?: string };
+  const body = (await request.json().catch(() => ({}))) as { date?: string; cardFile?: string; letterFile?: string; reflectOn?: string };
+
+  if (body.reflectOn) {
+    const got = await letterForReader(request, body.reflectOn);
+    if (got instanceof Response) return got;
+    return Response.json({ ticket: signTicket({ humanId: user._id, context: await termsFor([got.project]) }) });
+  }
 
   if (body.letterFile) {
-    const got = await letterForManager(request, body.letterFile);
+    const got = await letterForWriter(request, body.letterFile);
     if (got instanceof Response) return got;
     return Response.json({ ticket: signTicket({ humanId: user._id, context: await termsFor([got.project]) }) });
   }

@@ -18,7 +18,7 @@
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
 import { Link, redirect, useLoaderData, useNavigate, useRevalidator } from "react-router";
 import { useCallback, useMemo, useState } from "react";
-import { getUser } from "../modules/auth/auth.server";
+import { getUser, isImpersonating } from "../modules/auth/auth.server";
 import { getFolderById, getReadmeFileForFolder, canViewFolderOrgAware } from "robustness-core/data/vault.server";
 import { pageHash } from "robustness-core/data/pageBody.server";
 import { listMarksOnPage, pageMarkUnits, readableMark } from "robustness-core/data/graphLogMarks.server";
@@ -63,7 +63,7 @@ import { GROUPS, featuresOf, groupOf } from "robustness-core/data/features";
 import { ownLatestReading } from "robustness-core/data/dashboard.server";
 import { navFor } from "../data/nav.server";
 import { SteepGauge } from "../components/SteepGauge";
-import { LettersTile } from "../components/LettersTile";
+import { ProjectMailbox } from "../components/ProjectMailbox";
 import { PaymentsTile } from "../components/PaymentsTile";
 import { isPayable, listChargesForProject } from "robustness-core/data/billing.server";
 import { formatUsd } from "robustness-core/data/billingRules";
@@ -76,7 +76,11 @@ import OxRenderer from "../components/OxRenderer";
 import { ProjectFilesView } from "../components/ProjectFilesView";
 import { LettersView } from "../components/LettersView";
 import { ShareLinkControl } from "../components/ShareLinkControl";
-import { canManageLetters, listLetters, sentLetterLinks } from "robustness-core/data/letters.server";
+import { canManageLetters, letterViewerOf, listLetters, mailboxLines } from "robustness-core/data/letters.server";
+import { flaggedLetterIds } from "robustness-core/data/letterFlags.server";
+import { deskRows, houseOf, mayStartLetter, projectHasClients } from "robustness-core/data/letterHouses";
+import { houseMembers } from "robustness-core/data/letterHouses.server";
+import { reflectionToStartFrom } from "robustness-core/data/letterReflection.server";
 import { letterPdfState } from "robustness-core/data/letterPdf.server";
 import { ProjectView } from "../components/ProjectView";
 import type { CitedLogsForPen, MoveOptions, OxAnnotations } from "../oxmarkdown/marks";
@@ -150,20 +154,53 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // everyone with the tab; upload, replace and the share switch for a
   // Guide on the project or staff. The server refuses the rest anyway.
   const manageLetters = tab === "letters" && canManageLetters(user, role);
+  // Who may start a letter here (`mayStartLetter`): a Guide, or a client
+  // (Austin, 2026-11-05: both houses write). A client's desk is the same
+  // tab with less on it: their own drafts, the letters between the
+  // houses, New letter with a title alone (`deskRows`, `LettersView`).
+  const letterViewer = letterViewerOf(user._id, role);
+  // Everyone on the project with their house: the desk's filter and
+  // whether a new letter asks who it is for both read it.
+  const members = await houseMembers(folder);
+  const writesLetters = tab === "letters" && mayStartLetter(letterViewer);
+  // "Write a letter from this", from a letter's page (`?from=`, that
+  // letter's id): the New letter form opens, told which letter the
+  // viewer kept a talk-through of. Only for someone who may start a
+  // letter here, as themself, whose kept words are about a letter in
+  // this project they may still open (`reflectionToStartFrom`). The
+  // route that creates the letter asks all of it again.
+  const fromLetterId = writesLetters ? new URL(request.url).searchParams.get("from") : null;
+  const startFrom = fromLetterId && !(await isImpersonating(request)) ? await reflectionToStartFrom(folder, fromLetterId, user._id) : null;
+  const letterStartFrom = startFrom && fromLetterId ? { letterFileId: fromLetterId, title: startFrom.title, from: startFrom.from } : null;
   // A manager also sees each shared file's PDF state (ready, preparing,
   // failed with the worker's reason): the outcome of a worker job shows
   // on the page that asked for it, not in a log (`letterPdf.server.ts`).
-  // Read on every tab: the banner's tile lists the shared ones for
-  // everyone on the project, a Client included (they have no tab).
+  // Read on every tab: the banner's mailbox is there for everyone on
+  // the project, a Client included (they have no tab yet).
   const letterRows = await listLetters(folder);
-  const sharedLetters = sentLetterLinks(letterRows);
+  // The mailbox (`mailboxLines`, Austin 2026-11-05): the letters sent to
+  // the viewer's house by someone other than them, and every letter from
+  // before houses, which goes on showing to everyone. The flags are the
+  // viewer's own and nobody else's are read. Someone in the cache with
+  // no role is in no house and sees only the houseless ones, as before.
+  const viewerHouse = houseOf(role?.role);
+  const mailLines = mailboxLines(letterRows, { humanId: user._id, house: viewerHouse }, role ? await flaggedLetterIds(folder._id, user._id) : new Set());
+  // Who each letter is from, by first name: the mailbox's lines and the
+  // tab's rows both say it.
+  const letterFromIds = [...new Set(letterRows.flatMap((r) => (r.houses ? [r.houses.fromHumanId] : [])))];
+  const letterFromNames = new Map((letterFromIds.length ? await getHumansById(letterFromIds) : []).map((h) => [h._id, firstName(h)]));
+  const mail = mailLines.map(({ fromHumanId, ...line }) => ({ ...line, from: fromHumanId ? (letterFromNames.get(fromHumanId) ?? null) : null }));
+  // The tab is the viewer's desk (`deskRows`): what they may write, what
+  // their house has sent and received; a client's draft to that client
+  // alone, the guides' drafts to the guides' house as before.
   const letters =
     tab === "letters"
       ? await Promise.all(
-          letterRows.map(async (row) => ({
+          deskRows(letterRows, letterViewer, members).map(async (row) => ({
             ...row,
             // The PDF is of the sent copy and exists only while the link is on.
             pdf: manageLetters && row.sharedAt && row.sentHash ? await letterPdfState(row.fileId, row.sentHash) : null,
+            from: row.houses ? (letterFromNames.get(row.houses.fromHumanId) ?? null) : null,
           })),
         )
       : null;
@@ -325,7 +362,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     logbookFileIds,
     letters,
     manageLetters,
-    sharedLetters,
+    writesLetters,
+    lettersAsClient: letterViewer.house === "clients",
+    // A new letter asks who it is for when there are clients to send to.
+    lettersAskHouse: projectHasClients(members),
+    letterStartFrom,
+    mail,
     sensorData,
     boxHardwareData,
     seeding,
@@ -513,7 +555,7 @@ function Logbook({
 }
 
 export default function NewspaperRoute() {
-  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, sharedLetters, openBills, sensorData, boxHardwareData, seeding, budgetView, budget, budgetNames, canBudget, print } =
+  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, writesLetters, lettersAsClient, lettersAskHouse, letterStartFrom, mail, openBills, sensorData, boxHardwareData, seeding, budgetView, budget, budgetNames, canBudget, print } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders, loadCellGraphs } = project;
@@ -700,19 +742,18 @@ export default function NewspaperRoute() {
               ← My Projects
             </Link>
           )}
-          {(steep || seeding?.mine || sharedLetters.length > 0 || openBills.length > 0) && (
-            <Cluster gap={6} align="flex-start" style={{ justifyContent: "space-between" }}>
-              {steep && <SteepGauge projectFolderId={folder._id} mine={steep.mine} size="compact" />}
-              <Stack gap={4} align="flex-end" style={{ flex: 1 }}>
-                {/* The seeding tile, only while a round is open. */}
-                {seeding?.mine && <SeedPacket projectFolderId={folder._id} files={seeding.mine} seeding={seeding} onChanged={() => revalidator.revalidate()} />}
-                {/* What a guide has shared, only when something is. */}
-                <LettersTile links={sharedLetters} />
-                {/* A bill the guide sent, only to a Client, only while open. */}
-                <PaymentsTile bills={openBills} />
-              </Stack>
-            </Cluster>
-          )}
+          {/* The banner is always here now: the mailbox is, mail or no mail. */}
+          <Cluster gap={6} align="flex-start" style={{ justifyContent: "space-between" }}>
+            {steep && <SteepGauge projectFolderId={folder._id} mine={steep.mine} size="compact" />}
+            <Stack gap={4} align="flex-end" style={{ flex: 1 }}>
+              {/* The seeding tile, only while a round is open. */}
+              {seeding?.mine && <SeedPacket projectFolderId={folder._id} files={seeding.mine} seeding={seeding} onChanged={() => revalidator.revalidate()} />}
+              {/* The mailbox: always drawn, its flag up while the viewer has unopened mail. */}
+              <ProjectMailbox mail={mail} />
+              {/* A bill the guide sent, only to a Client, only while open. */}
+              <PaymentsTile bills={openBills} />
+            </Stack>
+          </Cluster>
           <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold" })}`}>
             {manifest.title ?? folder.name}
           </h1>
@@ -772,7 +813,7 @@ export default function NewspaperRoute() {
             />
           )}
           {letters && (
-            <LettersView projectFolderId={folder._id} rows={letters} manage={manageLetters} openInVault={openInVault} onChanged={() => revalidator.revalidate()} />
+            <LettersView projectFolderId={folder._id} rows={letters} manage={manageLetters} writes={writesLetters} asClient={lettersAsClient} asksHouse={lettersAskHouse} startFrom={letterStartFrom} onChanged={() => revalidator.revalidate()} />
           )}
           {tab === "sensorData" && sensorData && (
             <SensorDataView projectFolderId={folder._id} data={sensorData} />

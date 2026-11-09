@@ -51,7 +51,7 @@ describe("the letters projection", () => {
 
   it("lives under Syncs, beside Marks, and is rebuilt by the send and by the daily sync", () => {
     expect(LETTERS_SYNC_FOLDER_NAME).toBe("Letters");
-    expect(read("letterSend.server.ts")).toContain("await syncLettersProjection(home.project)");
+    expect(read("letterSend.server.ts")).toContain('await follow("projection", () => syncLettersProjection(home.project));');
     const sync = read("dailyLogSync.server.ts");
     expect(sync.indexOf("await syncMarksProjection(projectFolder)")).toBeLessThan(sync.indexOf("await syncLettersProjection(projectFolder)"));
   });
@@ -76,7 +76,8 @@ describe("the sent fields' one writer", () => {
 
   it("the PDF is of the sent copy and is asked for on every send, link on or off (2026-10-29)", () => {
     const send = read("letterSend.server.ts");
-    expect(send).toContain("await enqueueLetterPdfIfSent(after)");
+    // Asked for after the record write, as one of the send's consequences (`follow`).
+    expect(send).toContain('await follow("pdf", () => enqueueLetterPdfIfSent(after));');
     const pdf = read("letterPdf.server.ts");
     expect(pdf).toContain("return sentCopyOf(file)?.hash ?? contentFingerprint(file)");
     expect(pdf).toContain("!isLetterSent(file)");
