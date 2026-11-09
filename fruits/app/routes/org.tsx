@@ -25,12 +25,13 @@ import { useEffect, useRef, useState } from "react";
 import type { ActionFunctionArgs, LoaderFunctionArgs, MetaFunction } from "react-router";
 import { data, redirect, useFetcher, useLoaderData } from "react-router";
 import { getUser } from "../modules/auth/auth.server";
-import { getHumansById, isStaff, type Human } from "robustness-core/data/humans.server";
+import { getHumans, isStaff, type Human } from "robustness-core/data/humans.server";
 import {
   getOrganization,
   getOrganizationMembers,
   getOrganizationRole,
   setOrganizationHolidays,
+  setOrganizationMemberRole,
   setOrganizationSchedulers,
   NOPAL_ORGANIZATION_ID,
   type MeetingScheduler,
@@ -38,6 +39,7 @@ import {
 } from "robustness-core/data/organizations.server";
 import { newRecordId } from "robustness-core/data/generic.server";
 import { withRequestPerf } from "robustness-core/data/requestPerf.server";
+import type { Group } from "robustness-core/data/features";
 import { navFor } from "../data/nav.server";
 import { AppLayout } from "../components/AppLayout";
 import { NameAndEmail } from "../components/ProjectPeople";
@@ -47,6 +49,8 @@ import { Cluster } from "stamps/Cluster";
 import { Surface } from "stamps/Surface";
 import { Input } from "stamps/Input";
 import { Select, type SelectOption } from "stamps/Select";
+import { Badge } from "stamps/Badge";
+import { Modal } from "stamps/Modal";
 import { button } from "stamps/button.css";
 import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
@@ -69,11 +73,11 @@ async function requireOrgAccess(request: Request) {
   return user;
 }
 
-type OrgMember = { id: string; name: string; email: string };
+type OrgMember = { id: string; name: string; email: string; role: Group };
 type SchedulerView = { id: string; name: string; members: OrgMember[] };
 
-function asOrgMember(human: Human): OrgMember {
-  return { id: human._id, name: human.name || human.email, email: human.email };
+function asOrgMember(human: Human, role: Group): OrgMember {
+  return { id: human._id, name: human.name || human.email, email: human.email, role };
 }
 
 export async function loader({ request }: LoaderFunctionArgs) {
@@ -86,10 +90,33 @@ export async function loader({ request }: LoaderFunctionArgs) {
       const organization = await getOrganization(NOPAL_ORGANIZATION_ID);
       const holidays = [...(organization?.holidays ?? [])].sort((a, b) => a.date.localeCompare(b.date));
 
+      // Every Human, not just current org members — the "Add a Guide"
+      // control needs to offer someone who isn't an org member at all yet
+      // too (`setOrganizationMemberRole` adds them on the spot, same as
+      // the backfill script's own one-time pass did for everyone else).
+      const allHumans = (await getHumans())?.data ?? [];
+      const humanById = new Map(allHumans.map((h) => [h._id, h]));
+
       const orgMemberships = await getOrganizationMembers(NOPAL_ORGANIZATION_ID);
-      const humans = await getHumansById(orgMemberships.map((m) => m.human_id));
-      const humanById = new Map(humans.map((h) => [h._id, h]));
-      const members = humans.map(asOrgMember).sort((a, b) => a.name.localeCompare(b.name));
+      const roleByHumanId = new Map(orgMemberships.map((m) => [m.human_id, m.role]));
+      const members: OrgMember[] = orgMemberships
+        .map((m) => {
+          const human = humanById.get(m.human_id);
+          return human ? asOrgMember(human, m.role) : null;
+        })
+        .filter((m): m is OrgMember => !!m)
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      // Only a Guide reaches every project automatically and is eligible
+      // for a meeting scheduler (see `action`'s own `add-scheduler-member`
+      // guard) — everyone else on a scheduler would be a silent no-op for
+      // booking purposes, so they're never offered there.
+      const guides = members.filter((m) => m.role === "Guide");
+      const guideIds = new Set(guides.map((g) => g.id));
+      const addGuideCandidates: SelectOption[] = allHumans
+        .filter((h) => !guideIds.has(h._id))
+        .map((h) => ({ value: h._id, label: h.name ? `${h.name} (${h.email})` : h.email }))
+        .sort((a, b) => a.label.localeCompare(b.label));
 
       const schedulers: SchedulerView[] = (organization?.schedulers ?? []).map((s) => ({
         id: s.id,
@@ -97,15 +124,18 @@ export async function loader({ request }: LoaderFunctionArgs) {
         members: s.humanIds
           .map((id) => humanById.get(id))
           .filter((h): h is Human => !!h)
-          .map(asOrgMember),
+          .map((h) => asOrgMember(h, roleByHumanId.get(h._id) ?? "Client")),
       }));
 
       return {
         user: { name: user.name ?? null, email: user.email, role: user.role },
         ...nav,
         organizationName: organization?.name ?? DEFAULT_TITLE_NAME,
+        isAdmin: isStaff(user),
         holidays,
         members,
+        guides,
+        addGuideCandidates,
         schedulers,
       };
     },
@@ -115,14 +145,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
 type ActionResult =
   | {
       ok: true;
-      intent: "add-holiday" | "remove-holiday" | "create-scheduler" | "delete-scheduler" | "add-scheduler-member" | "remove-scheduler-member";
+      intent:
+        | "add-holiday"
+        | "remove-holiday"
+        | "create-scheduler"
+        | "delete-scheduler"
+        | "add-scheduler-member"
+        | "remove-scheduler-member"
+        | "add-guide"
+        | "remove-guide";
     }
   | { ok: false; intent: string; error: string };
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function action({ request }: ActionFunctionArgs): Promise<ActionResult> {
-  await requireOrgAccess(request);
+  const user = await requireOrgAccess(request);
   const form = await request.formData();
   const intent = String(form.get("intent") ?? "");
 
@@ -171,6 +209,12 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     const id = String(form.get("id") ?? "");
     const humanId = String(form.get("humanId") ?? "");
     if (!humanId) return { ok: false, intent, error: "Pick a person" };
+    // Re-checked here, not just left to the UI only offering Guides in its
+    // own dropdown (`AddSchedulerMemberForm`'s `options`) — only a Guide
+    // reaches every project automatically and is meant to be bookable.
+    if ((await getOrganizationRole(humanId, NOPAL_ORGANIZATION_ID)) !== "Guide") {
+      return { ok: false, intent, error: "Only a Guide can be added to a scheduler" };
+    }
     const organization = await getOrganization(NOPAL_ORGANIZATION_ID);
     const schedulers = (organization?.schedulers ?? []).map((s) =>
       s.id === id && !s.humanIds.includes(humanId) ? { ...s, humanIds: [...s.humanIds, humanId] } : s,
@@ -188,6 +232,32 @@ export async function action({ request }: ActionFunctionArgs): Promise<ActionRes
     );
     await setOrganizationSchedulers(schedulers);
     return { ok: true, intent: "remove-scheduler-member" };
+  }
+
+  if (intent === "add-guide" || intent === "remove-guide") {
+    // Org-wide Guide is the single most powerful role here — it reaches
+    // every project in the Organization automatically with no `sharing`
+    // entry needed (Phase C, `garden/4-harvested/organizations.md`).
+    // Same restriction project-level Sharing Roles already apply to
+    // Guide specifically (ADR-024, `promotionRefusal` in
+    // `projectSharing.server.ts`): only an admin grants or revokes it.
+    if (!isStaff(user)) return { ok: false, intent, error: "Only an admin can add or remove a Guide" };
+    const humanId = String(form.get("humanId") ?? "");
+    if (!humanId) return { ok: false, intent, error: "Pick a person" };
+    const role: Group = intent === "add-guide" ? "Guide" : "Client";
+    await setOrganizationMemberRole(humanId, role, NOPAL_ORGANIZATION_ID);
+    if (intent === "remove-guide") {
+      // Keeps "only Guides are on a scheduler" true going forward — a
+      // demoted Guide would otherwise linger on any scheduler they were
+      // already added to.
+      const organization = await getOrganization(NOPAL_ORGANIZATION_ID);
+      const schedulers = (organization?.schedulers ?? []).map((s) => ({
+        ...s,
+        humanIds: s.humanIds.filter((id) => id !== humanId),
+      }));
+      await setOrganizationSchedulers(schedulers);
+    }
+    return { ok: true, intent };
   }
 
   return { ok: false, intent, error: "Unknown intent" };
@@ -309,11 +379,11 @@ function AddSchedulerMemberForm({ schedulerId, options }: { schedulerId: string;
   );
 }
 
-function SchedulerCard({ scheduler, allMembers }: { scheduler: SchedulerView; allMembers: OrgMember[] }) {
+function SchedulerCard({ scheduler, guides }: { scheduler: SchedulerView; guides: OrgMember[] }) {
   const fetcher = useFetcher<typeof action>();
   const pending = fetcher.state !== "idle";
   const memberIds = new Set(scheduler.members.map((m) => m.id));
-  const options: SelectOption[] = allMembers
+  const options: SelectOption[] = guides
     .filter((m) => !memberIds.has(m.id))
     .map((m) => ({ value: m.id, label: m.name }));
 
@@ -350,6 +420,112 @@ function SchedulerCard({ scheduler, allMembers }: { scheduler: SchedulerView; al
   );
 }
 
+/** One row of the combined Organization members list: name/email, their
+ * role as a `Badge`, and — for an admin viewing a current Guide — a
+ * "Remove as Guide" action right there inline, rather than a second,
+ * separate Guides-only list. `action`'s own `remove-guide` re-checks
+ * `isStaff` regardless of whether this button is even rendered. */
+function MemberRow({ member, isAdmin }: { member: OrgMember; isAdmin: boolean }) {
+  const fetcher = useFetcher<typeof action>();
+  const pending = fetcher.state !== "idle";
+  return (
+    <Cluster gap={3} align="center" style={{ justifyContent: "space-between" }}>
+      <NameAndEmail name={member.name} email={member.email} />
+      <Cluster gap={3} align="center">
+        <Badge variant={member.role === "Guide" ? "accent" : "neutral"}>{member.role}</Badge>
+        {isAdmin && member.role === "Guide" && (
+          <fetcher.Form
+            method="post"
+            onSubmit={(e) => {
+              if (!window.confirm(`Remove ${member.name} as a Guide? They'll come off every meeting scheduler too.`)) e.preventDefault();
+            }}
+          >
+            <input type="hidden" name="intent" value="remove-guide" />
+            <input type="hidden" name="humanId" value={member.id} />
+            <button type="submit" className={`${button({ variant: "quiet" })} ${textSize.xs}`} disabled={pending}>
+              Remove as Guide
+            </button>
+          </fetcher.Form>
+        )}
+      </Cluster>
+    </Cluster>
+  );
+}
+
+/** Every current org member, combined into one listing — directly
+ * answers "it's not clear who is currently a part of an organization",
+ * and (for an admin) doubles as where a Guide gets removed; adding one
+ * happens from the page header's "Add a Guide" button/modal instead,
+ * since it can name someone not on this list at all yet. */
+function MembersList({ members, isAdmin }: { members: OrgMember[]; isAdmin: boolean }) {
+  if (members.length === 0) {
+    return (
+      <p className={subtleText} style={subtle}>
+        None yet.
+      </p>
+    );
+  }
+  return (
+    <Stack gap={2}>
+      {members.map((m) => (
+        <MemberRow key={m.id} member={m} isAdmin={isAdmin} />
+      ))}
+    </Stack>
+  );
+}
+
+/** The page header's "Add a Guide" modal content — every Human not
+ * already a Guide (including someone not an org member at all yet;
+ * `setOrganizationMemberRole` adds them on the spot), picked from a
+ * `Select` since the roster is small. Closes its own modal via `onAdded`
+ * once the add actually succeeds. */
+function AddGuideForm({ options, onAdded }: { options: SelectOption[]; onAdded: () => void }) {
+  const fetcher = useFetcher<typeof action>();
+  const pending = fetcher.state !== "idle";
+  const [humanId, setHumanId] = useState("");
+  const result = fetcher.data?.intent === "add-guide" ? fetcher.data : null;
+  const error = result && !result.ok ? result.error : null;
+  const added = result?.ok === true;
+  useEffect(() => {
+    if (added) {
+      setHumanId("");
+      onAdded();
+    }
+  }, [added, onAdded]);
+  if (options.length === 0) {
+    return (
+      <p className={subtleText} style={subtle}>
+        Everyone is already a Guide.
+      </p>
+    );
+  }
+  return (
+    <fetcher.Form method="post">
+      <input type="hidden" name="intent" value="add-guide" />
+      <Stack gap={3}>
+        <Select
+          label="Person"
+          name="humanId"
+          value={humanId}
+          onChange={(e) => setHumanId(e.target.value)}
+          placeholder="Pick a person…"
+          options={options}
+        />
+        <Cluster gap={3} align="center">
+          <button type="submit" className={button({ variant: "primary" })} disabled={pending || !humanId}>
+            {pending ? "Adding…" : "Make Guide"}
+          </button>
+          {error && (
+            <span className={textSize.xs} style={subtle}>
+              {error}
+            </span>
+          )}
+        </Cluster>
+      </Stack>
+    </fetcher.Form>
+  );
+}
+
 function CreateSchedulerForm() {
   const fetcher = useFetcher<typeof action>();
   const pending = fetcher.state !== "idle";
@@ -381,24 +557,45 @@ function CreateSchedulerForm() {
 }
 
 export default function Org() {
-  const { organizationName, holidays, members, schedulers } = useLoaderData<typeof loader>();
+  const { organizationName, isAdmin, holidays, members, guides, addGuideCandidates, schedulers } =
+    useLoaderData<typeof loader>();
+
+  const [addGuideOpen, setAddGuideOpen] = useState(false);
 
   return (
     <AppLayout>
       <CenterContent maxWidth={680}>
         <Stack gap={8}>
-          <Stack gap={1}>
-            <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>
-              {organizationName} Organization
-            </h1>
-            <p className={subtleText} style={subtle}>
-              Observed holidays, and the named meeting schedulers built from people's own availability. Each
-              person's own "professor's hours" live on their Profile page.
-            </p>
+          <Cluster gap={4} align="flex-start" style={{ justifyContent: "space-between" }}>
+              <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>
+                {organizationName} Organization
+              </h1>
+            {isAdmin && (
+              <button type="button" className={button({ variant: "secondary" })} onClick={() => setAddGuideOpen(true)}>
+                Add a Guide
+              </button>
+            )}
+          </Cluster>
+
+          <Modal open={addGuideOpen} onClose={() => setAddGuideOpen(false)} title="Add a Guide">
+            <Stack gap={3}>
+              <p className={subtleText} style={subtle}>
+                A Guide reaches every project in {organizationName} automatically, and is the only role
+                eligible for a meeting scheduler.
+              </p>
+              <AddGuideForm options={addGuideCandidates} onAdded={() => setAddGuideOpen(false)} />
+            </Stack>
+          </Modal>
+
+          <Stack gap={3}>
+            <h2 className={`${textSize.lg} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>Members</h2>
+            <Surface className={sprinkles({ p: 5 })}>
+              <MembersList members={members} isAdmin={isAdmin} />
+            </Surface>
           </Stack>
 
           <Stack gap={3}>
-            <h2 className={`${textSize.lg} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>Holidays observed</h2>
+            <h2 className={`${textSize.lg} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>Holidays</h2>
             <Surface className={sprinkles({ p: 5 })}>
               <Stack gap={4}>
                 <Stack gap={2}>
@@ -417,14 +614,9 @@ export default function Org() {
 
           <Stack gap={3}>
             <h2 className={`${textSize.lg} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>Meeting schedulers</h2>
-            <p className={subtleText} style={subtle}>
-              A scheduler combines one or more people's own availability into one named set — e.g. a
-              "Potential Lead" scheduler naming two Guides. Everyone already has their own, automatically
-              (just their own availability); use this to build shared ones across people.
-            </p>
             <Stack gap={3}>
               {schedulers.map((s) => (
-                <SchedulerCard key={s.id} scheduler={s} allMembers={members} />
+                <SchedulerCard key={s.id} scheduler={s} guides={guides} />
               ))}
               <CreateSchedulerForm />
             </Stack>
