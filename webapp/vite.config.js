@@ -3,6 +3,12 @@ import { vanillaExtractPlugin } from "@vanilla-extract/vite-plugin";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  // The repo root's `.env` (see that file, and the root `.env-example`) --
+  // shared with fruits and the worker (see their own vite.config's) so
+  // there's exactly one `.env` for local, non-Docker dev, not a copy per
+  // package. Only used when running `node server.js` directly on the
+  // host; docker-compose.yml injects env vars explicitly instead.
+  envDir: "..",
   // vanillaExtractPlugin must run before reactRouter's own Vite plugin so
   // `.css.ts` files from `stamps` (or webapp's own future ones) are
   // compiled to real CSS before React Router's build sees them.
