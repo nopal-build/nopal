@@ -1,6 +1,5 @@
 /.git
 .env
-webapp/.env
 Dockerfile
 fly.toml
 

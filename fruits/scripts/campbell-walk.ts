@@ -29,7 +29,7 @@
 //
 // From fruits/, against a running local stack (or production with test
 // accounts, by HOST):
-//   source ../webapp/.env; unset SESSION_SECRET
+//   source ../.env; unset SESSION_SECRET
 //   npx vite-node scripts/campbell-walk.ts <client> <crafter> <guide> <admin> <ownProjectId> <otherProjectId>
 // <guide> must not be an admin; the walk makes them Guide on the project
 // through the Maker and puts their old role back. Use someone who already
