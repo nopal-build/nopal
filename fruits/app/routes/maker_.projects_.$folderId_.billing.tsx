@@ -10,6 +10,9 @@
 //   Plans take no discount: every client pays the same monthly rate.
 // - `approve_resume`: resume a paused plan, on a Client's request or the
 //   guide's own say.
+// - `approve_level`, `decline_level`: answer a Client's ask for a
+//   different level (2026-11-09). Approving is a plan change at the next
+//   billing date; either way the client has an email.
 // - `pause`, `undo_pause`, `cancel`: the guide's own plan controls
 //   (Austin, 2026-11-03): the same rules as the Client's (a pause from the
 //   next billing date; a cancel with 30 days' notice).
@@ -25,7 +28,7 @@ import { runsPeople } from "../data/projectPeople.server";
 import { attachableFiles, clientsOn, sendPaymentRequest } from "../data/payments.server";
 import { cancelCharge, createCharge, getCharge } from "robustness-core/data/billing.server";
 import { hasTypedAmount, isMenuPlan, isOneTimeKind, parseDiscountPercent, parseUsdToCents } from "robustness-core/data/billingRules";
-import { approveResume, cancelPlan, getPlan, pausePlan, setPlanLevel, undoPause } from "robustness-core/data/billingPlans.server";
+import { approveLevelRequest, approveResume, cancelPlan, declineLevelRequest, getPlan, pausePlan, setPlanLevel, undoPause } from "robustness-core/data/billingPlans.server";
 import { sendPlanNotices } from "../data/billingNotices.server";
 
 export type BillingActionResult = { ok: true; message?: string } | { error: string };
@@ -68,6 +71,17 @@ export async function action({ request, params }: ActionFunctionArgs): Promise<B
       return { ok: true, message: notices.length ? "Saved, and the client has an email." : "Saved." };
     } catch (err) {
       console.error("billing: set plan failed", err);
+      return { error: err instanceof Error ? err.message : "Stripe didn't take that." };
+    }
+  }
+
+  if (intent === "approve_level" || intent === "decline_level") {
+    try {
+      const notices = intent === "approve_level" ? await approveLevelRequest(folder._id) : await declineLevelRequest(folder._id);
+      await sendPlanNotices(notices, origin);
+      return { ok: true, message: intent === "approve_level" ? "Approved, and the client has an email." : "Declined, and the client has an email." };
+    } catch (err) {
+      console.error(`billing: ${intent} failed`, err);
       return { error: err instanceof Error ? err.message : "Stripe didn't take that." };
     }
   }

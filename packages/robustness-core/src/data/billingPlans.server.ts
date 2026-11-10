@@ -89,6 +89,11 @@ export type BillingPlan = Data & {
   paused_at: string | null;
   resume_requested_at: string | null;
   resume_requested_by: string | null;
+  /** A Client asked for a different level; the guide approves or declines
+   * (Austin, 2026-11-09). The plan keeps running meanwhile. */
+  level_requested?: MenuPlan | null;
+  level_requested_at?: string | null;
+  level_requested_by?: string | null;
   pause_warned_at: string | null;
   pause_alerted_at: string | null;
   /** When the project's work went on hold for a missing bank link; null
@@ -108,6 +113,8 @@ export type PlanNotice =
   | { type: "debit_moved"; folderId: string; level: MenuPlan; date: string; amountCents: number; reason: "change" | "resume" }
   | { type: "pause_scheduled"; folderId: string; date: string; by: "client" | "guide" }
   | { type: "resume_requested"; folderId: string; byHumanId: string }
+  | { type: "level_requested"; folderId: string; level: MenuPlan; byHumanId: string }
+  | { type: "level_declined"; folderId: string; level: MenuPlan; byHumanId: string }
   | { type: "canceling"; folderId: string; date: string }
   | { type: "payment_failed"; folderId: string; amountCents: number }
   | { type: "pause_warn"; folderId: string; since: string }
@@ -153,6 +160,9 @@ function emptyPlan(): Omit<BillingPlan, "id" | "_id"> {
     paused_at: null,
     resume_requested_at: null,
     resume_requested_by: null,
+    level_requested: null,
+    level_requested_at: null,
+    level_requested_by: null,
     pause_warned_at: null,
     pause_alerted_at: null,
     hold_since: null,
@@ -261,7 +271,36 @@ export async function approveResume(folderId: string): Promise<PlanNotice[]> {
   ];
 }
 
+/** A guide answers a Client's level request: approving is a plan change
+ * (next billing date, 7-day ACH rule); declining clears it and tells the
+ * Client. */
+export async function approveLevelRequest(folderId: string, now = new Date()): Promise<PlanNotice[]> {
+  const plan = await getPlan(folderId);
+  if (!plan?.level_requested) throw new Error("Nobody asked for a different level");
+  return changePlan(plan, plan.level_requested, now);
+}
+
+export async function declineLevelRequest(folderId: string): Promise<PlanNotice[]> {
+  const plan = await getPlan(folderId);
+  if (!plan?.level_requested || !plan.level_requested_by) throw new Error("Nobody asked for a different level");
+  await savePlan(folderId, NO_LEVEL_REQUEST);
+  return [{ type: "level_declined", folderId, level: plan.level_requested, byHumanId: plan.level_requested_by }];
+}
+
 // ─── The client's side ──────────────────────────────────────────────────
+
+const NO_LEVEL_REQUEST = { level_requested: null, level_requested_at: null, level_requested_by: null } as const;
+
+/** A Client asks for a different level (Austin, 2026-11-09: a Client
+ * requests, the guide decides). Only on a running, unpaused plan, like a
+ * change. Asking again replaces the earlier ask. */
+export async function requestLevel(plan: BillingPlan, level: MenuPlan, byHumanId: string): Promise<PlanNotice[]> {
+  if (!["active", "pause_scheduled", "past_due"].includes(plan.status)) throw new Error("Only a running plan can change level");
+  const billing = plan.pending_level ?? plan.level;
+  if (level === billing) throw new Error("That's the plan you're on");
+  await savePlan(plan._id, { level_requested: level, level_requested_at: new Date().toISOString(), level_requested_by: byHumanId });
+  return [{ type: "level_requested", folderId: plan._id, level, byHumanId }];
+}
 
 /** A plan change, by the guide or a Client: takes effect at the next
  * billing date, or the one after if that is inside the ACH notice. */
@@ -281,6 +320,7 @@ export async function changePlan(plan: BillingPlan, level: MenuPlan, now = new D
       phases: [{ items: [{ price: currentPriceId }], start_date: current.start_date, metadata, ...OPEN_ENDED }],
       proration_behavior: "none",
     });
+    await savePlan(plan._id, NO_LEVEL_REQUEST);
     await syncPlanFromStripe(plan._id);
     return [];
   }
@@ -293,6 +333,7 @@ export async function changePlan(plan: BillingPlan, level: MenuPlan, now = new D
     ],
     proration_behavior: "none",
   });
+  await savePlan(plan._id, NO_LEVEL_REQUEST);
   await syncPlanFromStripe(plan._id);
   return [
     {
@@ -341,6 +382,7 @@ export async function requestResume(plan: BillingPlan, byHumanId: string): Promi
  * month. A paused plan ends now (no service is running, nothing bills). */
 export async function cancelPlan(plan: BillingPlan, now = new Date()): Promise<PlanNotice[]> {
   if (!plan.stripe_subscription_id || !plan.stripe_schedule_id) throw new Error("This plan hasn't started");
+  if (plan.level_requested) await savePlan(plan._id, NO_LEVEL_REQUEST);
   if (plan.status === "paused" || plan.status === "resume_requested") {
     await stripe().subscriptions.cancel(plan.stripe_subscription_id);
     await syncPlanFromStripe(plan._id);

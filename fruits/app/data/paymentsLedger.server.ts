@@ -17,7 +17,7 @@ export const UPCOMING_DAYS = 60;
 export const RECENT_DAYS = 90;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export type LedgerState = "hold" | "failed" | "resume" | "waiting" | "due" | "awaiting_bank" | "paid" | "clearing";
+export type LedgerState = "hold" | "failed" | "resume" | "level" | "waiting" | "due" | "awaiting_bank" | "paid" | "clearing";
 
 export type LedgerRow = {
   key: string;
@@ -79,6 +79,9 @@ export function buildLedger(input: {
     if (p.status === "resume_requested") {
       needsYou.push({ ...base, key: `${p._id}-resume`, at: p.resume_requested_at ?? p.updated_at, what: `${planName(p.level)}, asked to resume`, who: who(p.resume_requested_by), amountCents: null, state: "resume" });
     }
+    if (p.level_requested && ["active", "pause_scheduled", "past_due"].includes(p.status)) {
+      needsYou.push({ ...base, key: `${p._id}-level`, at: p.level_requested_at ?? p.updated_at, what: `${planName(p.level)}, asked to move to ${MENU_PLAN_LABELS[p.level_requested]}`, who: who(p.level_requested_by ?? null), amountCents: null, state: "level" });
+    }
     if (p.status === "past_due") {
       needsYou.push({ ...base, key: `${p._id}-failed`, at: p.updated_at, what: planName(p.level), who: who(p.payer_human_id), amountCents: p.next_amount_cents, state: "failed" });
     }
@@ -129,7 +132,7 @@ export async function loadLedger(input: {
       ...new Set(
         [
           ...input.charges.map((c) => c.paid_by_human_id),
-          ...input.plans.flatMap((p) => [p.payer_human_id, p.resume_requested_by]),
+          ...input.plans.flatMap((p) => [p.payer_human_id, p.resume_requested_by, p.level_requested_by ?? null]),
         ].filter((id): id is string => !!id),
       ),
     ]),

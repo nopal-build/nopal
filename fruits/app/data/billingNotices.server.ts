@@ -127,6 +127,32 @@ async function mailFor(notice: PlanNotice, project: string, origin: string): Pro
           button: maker,
         },
       ];
+    case "level_requested": {
+      const [who] = await getHumansById([notice.byHumanId]);
+      return [
+        {
+          to: "guides",
+          subject: `${project} asked to move to ${MENU_PLAN_LABELS[notice.level]}`,
+          lines: [
+            `${who ? displayName(who) : "The client"} asked to move ${project} to the ${MENU_PLAN_LABELS[notice.level]} plan.`,
+            "Approve or decline it under Change plan on the project's Maker page. Nothing changes until you do.",
+          ],
+          button: maker,
+        },
+      ];
+    }
+    case "level_declined":
+      return [
+        {
+          to: "clients",
+          subject: `${project} stays on its plan for now`,
+          lines: [
+            `Your guide kept ${project} on its current plan instead of moving to ${MENU_PLAN_LABELS[notice.level]}.`,
+            "They'll talk it through with you. You can ask again from your profile.",
+          ],
+          button: profile,
+        },
+      ];
     case "resume_requested": {
       const [who] = await getHumansById([notice.byHumanId]);
       return [
@@ -292,11 +318,14 @@ export type PlanView = {
   level: string | null;
   status: string;
   line: string;
-  canChange: boolean;
   canPause: boolean;
   canUndoPause: boolean;
   canRequestResume: boolean;
   canApproveResume: boolean;
+  /** A Client's open ask for a different level, by its label. */
+  levelRequested: string | null;
+  /** A Client may ask for a different level (they never change it directly). */
+  canRequestLevel: boolean;
   /** A guide resuming a pause nobody asked to end. */
   canResumeNow: boolean;
   canCancel: boolean;
@@ -345,6 +374,10 @@ export function describePlan(plan: BillingPlan | null, audience: "guide" | "clie
     default:
       line = "No plan.";
   }
+  if (plan?.level_requested && ["active", "pause_scheduled", "past_due"].includes(status)) {
+    const asked = MENU_PLAN_LABELS[plan.level_requested];
+    line += audience === "guide" ? ` The client asked to move to ${asked}.` : ` You asked to move to ${asked}; your guide will confirm.`;
+  }
   if (isOnHold(plan)) {
     line =
       status === "awaiting_setup"
@@ -355,11 +388,12 @@ export function describePlan(plan: BillingPlan | null, audience: "guide" | "clie
     level: plan?.level ?? null,
     status,
     line,
-    canChange: status === "active" || status === "pause_scheduled" || status === "past_due",
     canPause: status === "active",
     // A guide's pause isn't the client's to undo.
     canUndoPause: status === "pause_scheduled" && (audience === "guide" || plan?.pause_by !== "guide"),
     canRequestResume: status === "paused",
+    levelRequested: plan?.level_requested ? MENU_PLAN_LABELS[plan.level_requested] : null,
+    canRequestLevel: status === "active" || status === "pause_scheduled" || status === "past_due",
     canApproveResume: status === "resume_requested",
     canResumeNow: audience === "guide" && status === "paused",
     canCancel: ["active", "pause_scheduled", "paused", "resume_requested", "past_due"].includes(status),

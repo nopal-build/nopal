@@ -1,6 +1,7 @@
 // app/routes/api.billing.plan.$folderId.tsx → POST /api/billing/plan/:folderId
 // The buttons on a Client's profile for a project's plan (payments seed):
-// change the level, pause at the next billing date (and undo it), ask to
+// ask for a different level (the guide approves on the Maker page; Austin,
+// 2026-11-09: a Client requests, never changes it directly), pause at the next billing date (and undo it), ask to
 // resume, cancel with 30 days' notice. Only a Client on the project; the
 // guide's own controls are on the project's Maker page.
 import type { ActionFunctionArgs } from "react-router";
@@ -11,9 +12,9 @@ import { isClientOn } from "../data/payments.server";
 import { sendPlanNotices } from "../data/billingNotices.server";
 import {
   cancelPlan,
-  changePlan,
   getPlan,
   pausePlan,
+  requestLevel,
   requestResume,
   undoPause,
   type PlanNotice,
@@ -34,10 +35,10 @@ export async function action({ request, params }: ActionFunctionArgs): Promise<P
   const intent = String(form.get("intent") ?? "");
   let notices: PlanNotice[] = [];
   try {
-    if (intent === "change") {
+    if (intent === "request_level") {
       const level = String(form.get("level") ?? "");
       if (!isMenuPlan(level)) return { error: "Pick a plan." };
-      notices = await changePlan(plan, level);
+      notices = await requestLevel(plan, level, user._id);
     } else if (intent === "pause") {
       notices = await pausePlan(plan);
     } else if (intent === "undo_pause") {

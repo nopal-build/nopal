@@ -1,7 +1,8 @@
 // app/components/ProfilePayments.tsx
 // The profile's Payments section (payments seed, Austin 2026-11-03): for
 // a Client, each project's plan with its buttons (link a bank account,
-// change the level, pause or undo it, ask to resume, cancel, use another
+// ask for a different level (the guide decides, 2026-11-09), pause or
+// undo it, ask to resume, cancel, use another
 // account), then the bills on every project they're a Client on. Guides
 // have none: their controls are on the project's Maker page.
 import { useState } from "react";
@@ -47,6 +48,9 @@ function PlanCard({ plan, levels }: { plan: ProfilePlan; levels: { value: string
   const send = (intent: string, extra: Record<string, string> = {}) =>
     fetcher.submit({ intent, ...extra }, { method: "post", action });
   const v = plan.view;
+  // Any level but the one billing now. The view's `level` is the plan's.
+  const others = levels.filter((l) => l.value !== v.level);
+  const [asked, setAsked] = useState(others[0]?.value ?? "");
   return (
     <Surface className={sprinkles({ p: 4 })}>
       <Stack gap={3}>
@@ -57,18 +61,20 @@ function PlanCard({ plan, levels }: { plan: ProfilePlan; levels: { value: string
             Link a bank account
           </Link>
         )}
-        {changing && (
+        {changing && others.length > 0 && (
           <Cluster gap={3} align="flex-end">
-            <Select
-              label="New plan"
-              name="level"
-              options={levels}
-              defaultValue={v.level ?? undefined}
-              onChange={(e) => {
-                send("change", { level: e.target.value });
+            <Select label="The plan you'd like" name="level" options={others} value={asked} onChange={(e) => setAsked(e.target.value)} />
+            <button
+              type="button"
+              className={button({ variant: "secondary" })}
+              disabled={busy}
+              onClick={() => {
+                send("request_level", { level: asked });
                 setChanging(false);
               }}
-            />
+            >
+              Ask
+            </button>
             <button type="button" className={`${link} ${textSize.xs}`} onClick={() => setChanging(false)}>
               Never mind
             </button>
@@ -76,7 +82,7 @@ function PlanCard({ plan, levels }: { plan: ProfilePlan; levels: { value: string
         )}
         {changing && (
           <p className={`${textSize.xs} ${sprinkles({ m: 0 })}`} style={{ color: semanticColors.textSubtle }}>
-            A change starts at your next billing date, or the one after if that's less than 7 days away.
+            Your guide confirms a new plan with you. It starts at your next billing date, or the one after if that's less than 7 days away.
           </p>
         )}
         {confirmCancel ? (
@@ -91,9 +97,9 @@ function PlanCard({ plan, levels }: { plan: ProfilePlan; levels: { value: string
           </Cluster>
         ) : (
           <Cluster gap={4} align="center">
-            {v.canChange && !changing && (
+            {v.canRequestLevel && !changing && (
               <button type="button" className={`${link} ${textSize.sm}`} disabled={busy} onClick={() => setChanging(true)}>
-                Change plan
+                {v.levelRequested ? "Ask for a different plan instead" : "Ask for a different plan"}
               </button>
             )}
             {v.canPause && (

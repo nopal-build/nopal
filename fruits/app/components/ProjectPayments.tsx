@@ -259,6 +259,32 @@ function PlanSummary({ plan }: { plan: PlanView }) {
   );
 }
 
+/** A Client asked for a different level (2026-11-09): the guide approves
+ * (a plan change at the next billing date) or declines. */
+function LevelRequest({ action, level }: { action: string; level: string }) {
+  const fetcher = useFetcher<BillingActionResult>();
+  const busy = fetcher.state !== "idle";
+  const result = fetcher.state === "idle" ? fetcher.data : undefined;
+  const send = (intent: string) => fetcher.submit({ intent }, { method: "post", action });
+  return (
+    <Stack gap={2}>
+      <span className={textSize.sm}>
+        Move to <strong>{level}</strong>, as the client asked?
+      </span>
+      <Cluster gap={3} align="center">
+        <button type="button" className={button({ variant: "primary" })} disabled={busy} onClick={() => send("approve_level")}>
+          Approve
+        </button>
+        <button type="button" className={`${link} ${textSize.sm}`} disabled={busy} onClick={() => send("decline_level")}>
+          Decline
+        </button>
+      </Cluster>
+      {result && "error" in result && <Notice tone="danger">{result.error}</Notice>}
+      {result && "ok" in result && result.message && <Notice tone="subtle">{result.message}</Notice>}
+    </Stack>
+  );
+}
+
 /** Inside the "Change plan" popup: the level and billing day, plus the
  * pause, end and resume controls, which are plan changes too. */
 function PlanForm({
@@ -283,6 +309,7 @@ function PlanForm({
   return (
     <Stack gap={3}>
       <Notice tone="subtle">{plan.line}</Notice>
+      {plan.levelRequested && <LevelRequest action={action} level={plan.levelRequested} />}
       {(plan.canApproveResume || plan.canResumeNow) && (
         <Cluster gap={3} align="center">
           <button

@@ -103,7 +103,7 @@ vi.mock("robustness-core/data/stripe.server", () => {
   };
 });
 
-import { applyPlanEvent, approveResume, getPlan, isOnHold, pauseCheck, pausePlan, setPlanLevel } from "robustness-core/data/billingPlans.server";
+import { applyPlanEvent, approveLevelRequest, approveResume, declineLevelRequest, getPlan, isOnHold, pauseCheck, pausePlan, requestLevel, setPlanLevel } from "robustness-core/data/billingPlans.server";
 import { dayIn, firstBillingTime } from "robustness-core/data/billingRules";
 
 const TODAY = dayIn(new Date());
@@ -333,5 +333,58 @@ describe("the pause check", () => {
   it("doesn't alert when the Client has asked to resume", async () => {
     pausedSince(6, "resume_requested");
     expect((await pauseCheck()).map((n) => n.type)).toEqual(["pause_warn"]);
+  });
+});
+
+// Austin, 2026-11-09: a Client asks for a different level; the guide
+// decides. Asking moves nothing in Stripe.
+describe("a Client asks for a different level", () => {
+  const running = async () => {
+    await setPlanLevel({ folderId: "attic", level: "guide", startDay: TODAY });
+    await linked();
+    return (await getPlan("attic"))!;
+  };
+
+  it("records the ask and tells the guide, and touches nothing in Stripe", async () => {
+    const before = calls.scheduleUpdates.length;
+    const notices = await requestLevel(await running(), "deep_guide", "sue");
+    expect(notices).toEqual([{ type: "level_requested", folderId: "attic", level: "deep_guide", byHumanId: "sue" }]);
+    expect(plan()).toMatchObject({ level: "guide", level_requested: "deep_guide", level_requested_by: "sue" });
+    expect(calls.scheduleUpdates).toHaveLength(before);
+  });
+
+  it("refuses the plan they're already on", async () => {
+    await expect(requestLevel(await running(), "guide", "sue")).rejects.toThrow("That's the plan you're on");
+  });
+
+  it("refuses while the plan is paused", async () => {
+    await running();
+    fx.subStatus = "paused";
+    await applyPlanEvent(event("customer.subscription.paused", { id: "sub_1" }));
+    await expect(requestLevel((await getPlan("attic"))!, "deep_guide", "sue")).rejects.toThrow("Only a running plan");
+  });
+
+  it("the guide approves: a plan change to the asked level, and the ask clears", async () => {
+    await requestLevel(await running(), "deep_guide", "sue");
+    const notices = await approveLevelRequest("attic");
+    expect(notices[0]).toMatchObject({ type: "debit_moved", level: "deep_guide", reason: "change" });
+    const phases = calls.scheduleUpdates.at(-1)?.phases as { items: { price: string }[] }[];
+    expect(phases.at(-1)?.items[0].price).toBe("price_deep_guide");
+    expect(plan()?.level_requested).toBeNull();
+  });
+
+  it("the guide declines: the ask clears, the Client hears, Stripe is untouched", async () => {
+    await requestLevel(await running(), "light_guide", "sue");
+    const before = calls.scheduleUpdates.length;
+    const notices = await declineLevelRequest("attic");
+    expect(notices).toEqual([{ type: "level_declined", folderId: "attic", level: "light_guide", byHumanId: "sue" }]);
+    expect(plan()?.level_requested).toBeNull();
+    expect(calls.scheduleUpdates).toHaveLength(before);
+  });
+
+  it("a guide changing the level themselves clears an open ask", async () => {
+    await requestLevel(await running(), "deep_guide", "sue");
+    await setPlanLevel({ folderId: "attic", level: "light_guide", startDay: null });
+    expect(plan()?.level_requested).toBeNull();
   });
 });

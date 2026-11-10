@@ -65,6 +65,7 @@ const STATE_LABEL: Record<LedgerState, string> = {
   hold: "Work on hold",
   failed: "Didn't go through",
   resume: "Approve on the project",
+  level: "Approve or decline on the project",
   waiting: "Sent, waiting",
   due: "Debit due",
   awaiting_bank: "Waiting for a bank link",
