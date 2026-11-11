@@ -28,6 +28,7 @@ import { getUser } from "../modules/auth/auth.server";
 import { AppLayout } from "../components/AppLayout";
 import { CardTabs } from "../components/stamps-candidates/CardTabs";
 import { PinnedCard, PinnedCardWall } from "../components/stamps-candidates/PinnedCard";
+import { Mailbox } from "../components/stamps-candidates/Mailbox";
 import { SlopeGauge } from "../components/stamps-candidates/SlopeGauge";
 import { useSchemePref } from "../hooks/useSchemePref";
 import { Surface } from "stamps/Surface";
@@ -2153,6 +2154,7 @@ const DEMO_TABS = ["efforts", "photos", "files", "costs", "logbook"] as const;
 function CandidatesSection() {
   const [full, setFull] = useState<DemoSlopeKey | null>(null);
   const [compact, setCompact] = useState<DemoSlopeKey | null>("uphill");
+  const [flagUp, setFlagUp] = useState(false);
   const [params] = useSearchParams();
   const requested = params.get("demoTab");
   const tab = DEMO_TABS.find((t) => t === requested) ?? "efforts";
@@ -2177,6 +2179,24 @@ function CandidatesSection() {
             <div style={{ width: 260, maxWidth: "100%" }}>
               <SlopeGauge options={DEMO_SLOPE} chosen={compact} onChoose={setCompact} caption="Compact" size="compact" />
             </div>
+          </Cluster>
+        </Stack>
+
+        <Stack gap={3}>
+          <SpecimenCaption>
+            Mailbox: always drawn, a flag that stands up filled when there is mail, never a number (the project page's letters). One ink,
+            a 3 unit line with round ends, the way SlopeGauge and the postage stamps are drawn. The third one toggles.
+          </SpecimenCaption>
+          <Cluster gap={10} align="flex-end">
+            <Mailbox flagUp={false} onOpen={() => {}} label={<span className={textSize.xs}>Mail</span>} description="Mail. Nothing new." />
+            <Mailbox flagUp onOpen={() => {}} label={<span className={textSize.xs}>Mail</span>} description="Mail. There is a letter you haven't opened." />
+            <Mailbox
+              flagUp={flagUp}
+              onOpen={() => setFlagUp((up) => !up)}
+              label={<span className={textSize.xs}>Tap me</span>}
+              description="A mailbox whose flag toggles"
+              height={160}
+            />
           </Cluster>
         </Stack>
 

@@ -17,6 +17,7 @@ import {
   isFolderUnderSyncs,
 } from "robustness-core/data/vault.server";
 import { canActAsProjectOwner } from "robustness-core/data/projectSharing.server";
+import { letterChangeRefusal } from "robustness-core/data/letters.server";
 import { cacheDailyLog, deleteDailyLogCache } from "robustness-core/data/dailyLog.server";
 import { isFileRefLocked } from "robustness-core/data/vault.types";
 
@@ -164,6 +165,14 @@ export async function action({ request, params }: ActionFunctionArgs) {
   }
 
   // Owner (or owner-tier collaborator) operations below.
+
+  // A letter is changed by whoever may write it, in the back room as at
+  // the desk (`letterChangeRefusal`): a guide gets no further with a
+  // client's draft.
+  if (request.method === "DELETE" || request.method === "PATCH") {
+    const letter = await letterChangeRefusal(file, user);
+    if (letter) return Response.json({ error: letter.error }, { status: letter.status });
+  }
 
   // Root/folder-type policy (`vaultRoots.ts` / `vaultFolderTypes.ts`) —
   // today every root/type reachable here is "owner"-writable, so this

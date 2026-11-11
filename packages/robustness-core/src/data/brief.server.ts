@@ -28,14 +28,16 @@
  * record to every reader in the sharing cache, and a write there remounts
  * the editor) and not as a file in the Letters folder (the cache reads
  * the folder): its own row in `letter_briefs`, one per letter, replaced
- * on each run, read by one route that asks `canManageLetters` first. A
- * client, a Crafter or an Observer never reaches it.
+ * on each run, read by one route that asks who may write the letter
+ * first (a guide, or a client for their own, whose row holds a talk and
+ * an outline and never a brief). A Crafter or an Observer never reaches
+ * it.
  */
 
 import { RecordId } from "surrealdb";
 import { AnthropicProvider, isGraphLogAgentConfigured } from "./anthropicProvider.server";
 import { countPageWords } from "./effortReadings.server";
-import { defineTable, formatRecord, merge, select, upsert, type Data } from "./generic.server";
+import { defineTable, formatRecord, merge, remove, select, upsert, type Data } from "./generic.server";
 import { getEffectiveGraphLogDefaultSkill } from "./graphLogDefaults.server";
 import { classifyGraphLogError, recordGraphLogUsage } from "./graphLogMetrics.server";
 import { getGraphLogRunStartedAt } from "./graphLogPerf.server";
@@ -459,15 +461,23 @@ export type LetterBriefRow = Data & {
   /** The job asked for and not yet finished, so a second click waits. */
   pending_job_id: string | null;
   // ── The talk-through and the outline (`outline.server.ts`) ──
-  /** What the guide has typed and not yet put on the record. */
+  /** What the writer has typed and not yet handed over. */
   talk_draft?: string | null;
-  /** The talk as it went onto the guide's Card, when they asked for the outline. */
+  /** The talk as given, when they asked for the outline. It waits here
+   * until the letter is sent (`outline.server.ts`, `landTalkThrough`). */
   talk_through?: string | null;
   talk_through_at?: string | null;
   talk_through_by_human_id?: string | null;
-  /** The day it was written to, the device's date clamped by `markDate`. */
+  /** The day it went onto its speaker's Card, and that Card: both null
+   * while it waits for Send. A talk given before 2026-11-05 has both
+   * from the moment it was given. */
   talk_through_date?: string | null;
   talk_through_card_file_id?: string | null;
+  /** The letter its writer was reading when they said the talk-through:
+   * set when a letter is started from a kept reflection
+   * (`letterReflection.server.ts`). For the outline alone; the letter's
+   * own record names no other letter, and no reader is shown this. */
+  reflects_on_letter_file_id?: string | null;
   outline?: string | null;
   outline_written_at?: string | null;
   outline_by_human_id?: string | null;
@@ -494,6 +504,14 @@ export async function writeLetterBriefRow(letterFileId: string, patch: Partial<O
   const existing = await getLetterBriefRow(letterFileId);
   if (existing) await merge(TABLE, letterFileId, patch);
   else await upsert(new RecordId(TABLE, letterFileId), { content: null, written_at: null, by_human_id: null, run_id: null, model: null, incomplete: [], bounced: [], unmatched: [], pending_job_id: null, ...patch });
+}
+
+/** The row goes with a draft that is deleted (`letterDesk.server.ts`):
+ * its brief, and a talk-through and outline that never reached the
+ * record. Nothing to do when the letter never had one. */
+export async function removeLetterBriefRow(letterFileId: string): Promise<void> {
+  await ensureTable();
+  await remove(TABLE, letterFileId);
 }
 
 // ─── The stage ──────────────────────────────────────────────────────────
@@ -652,7 +670,11 @@ export type LetterJobForPage = { state: "waiting" | "active" | "failed" | "compl
 export type LetterBriefForPage = {
   brief: { content: string; writtenAt: string; byName: string; incomplete: string[] } | null;
   job: LetterJobForPage | null;
-  talk: { draft: string | null; sent: { text: string; at: string; date: string; byName: string } | null };
+  /** `sent` is the talk once given. `onRecord` is the day it went onto
+   * its speaker's Card, null while it waits for the letter to be sent.
+   * `about` is the letter the speaker was reading, when this letter was
+   * started from what they said about it: such a letter has no brief. */
+  talk: { draft: string | null; sent: { text: string; at: string; onRecord: string | null; byName: string; about?: { title: string; from: string | null } | null } | null };
   outline: { content: string; writtenAt: string; byName: string; incomplete: string[]; editedAt: string | null } | null;
   outlineJob: LetterJobForPage | null;
 };
@@ -671,17 +693,34 @@ async function jobForPage(jobId: string | null | undefined): Promise<LetterJobFo
   };
 }
 
+/** The day a talk-through went onto its speaker's Card, or null while it
+ * waits for the letter to be sent. The Card is what says it landed. Pure. */
+export function talkOnRecord(row: Pick<LetterBriefRow, "talk_through_at" | "talk_through_date" | "talk_through_card_file_id">): string | null {
+  if (!row.talk_through_card_file_id) return null;
+  return row.talk_through_date ?? row.talk_through_at?.slice(0, 10) ?? null;
+}
+
 export async function getLetterBriefForPage(letterFileId: string): Promise<LetterBriefForPage> {
   const row = await getLetterBriefRow(letterFileId);
-  const ids = [row?.by_human_id, row?.talk_through_by_human_id, row?.outline_by_human_id].filter((v): v is string => !!v);
+  const read = row?.reflects_on_letter_file_id ? await getFileRefById(row.reflects_on_letter_file_id) : undefined;
+  const readFromId = read ? (read.from_human_id ?? read.sent_by_human_id ?? null) : null;
+  const about = row?.reflects_on_letter_file_id ? { title: read ? letterTitle(read) : "a letter", from: null as string | null } : null;
+  const ids = [row?.by_human_id, row?.talk_through_by_human_id, row?.outline_by_human_id, readFromId].filter((v): v is string => !!v);
   const names = new Map((await getHumansById([...new Set(ids)])).map((h) => [h._id, firstName(h)]));
   const nameOf = (id: string | null | undefined) => (id && names.get(id)) || "a guide";
+  if (about && readFromId) about.from = names.get(readFromId) ?? null;
   const brief = row?.content && row.written_at ? { content: row.content, writtenAt: row.written_at, byName: nameOf(row.by_human_id), incomplete: row.incomplete ?? [] } : null;
   const talk = {
     draft: row?.talk_draft ?? null,
-    sent: row?.talk_through && row.talk_through_at ? { text: row.talk_through, at: row.talk_through_at, date: row.talk_through_date ?? row.talk_through_at.slice(0, 10), byName: nameOf(row.talk_through_by_human_id) } : null,
+    sent:
+      row?.talk_through && row.talk_through_at
+        ? { text: row.talk_through, at: row.talk_through_at, onRecord: talkOnRecord(row), byName: nameOf(row.talk_through_by_human_id), about }
+        : null,
   };
-  const outline = row?.outline && row.outline_written_at ? { content: row.outline, writtenAt: row.outline_written_at, byName: nameOf(row.outline_by_human_id), incomplete: row.outline_incomplete ?? [], editedAt: row.outline_edited_at ?? null } : null;
+  // An outline for a letter back carries no "Not finished" line: its
+  // length is code's, sent back once, and the person never sees a warning
+  // (the `reply-pause` seed's gate). A job that fails still says so.
+  const outline = row?.outline && row.outline_written_at ? { content: row.outline, writtenAt: row.outline_written_at, byName: nameOf(row.outline_by_human_id), incomplete: about ? [] : (row.outline_incomplete ?? []), editedAt: row.outline_edited_at ?? null } : null;
   return { brief, job: await jobForPage(row?.pending_job_id), talk, outline, outlineJob: await jobForPage(row?.outline_pending_job_id) };
 }
 

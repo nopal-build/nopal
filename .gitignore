@@ -43,3 +43,6 @@ tmp/
 
 # Local exports from db/compact.sh — contain production data, never commit.
 db/backups/
+
+# A local compose override (image swaps, healthchecks for a fresh machine): never commit.
+docker-compose.override.yml

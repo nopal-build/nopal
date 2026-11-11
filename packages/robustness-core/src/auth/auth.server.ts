@@ -482,6 +482,16 @@ export async function getImpersonationStatus(request: Request): Promise<{
   };
 }
 
+/** Whether this request's session is an admin viewing as someone else.
+ * A plain read: no expiry handling and no cookie written
+ * (`getImpersonationStatus` does those). For the few places where an act
+ * belongs to the person and not to whoever is looking as them, such as
+ * lowering a mailbox flag (`letterFlags.server.ts`). */
+export async function isImpersonating(request: Request): Promise<boolean> {
+  const session = await sessionStorage.getSession(request.headers.get("cookie"));
+  return !!session.get("impersonatorId");
+}
+
 /**
  * Update the session's stored user (e.g. after editing a profile) so later
  * requests reflect the change. Returns the `Set-Cookie` header to attach to

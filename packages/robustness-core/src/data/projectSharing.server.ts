@@ -37,7 +37,7 @@ import type { FileRef } from "./vault.types";
 import { parseCreatorRemoved, parseProjectSharing, withProjectSharing, type ProjectSharingEntry } from "./project.types";
 import { CLIENT_ROLE, GUIDING_ROLE, reachesProjectWork } from "./sharingRoles.server";
 import { featuresOf, groupOf, type Feature } from "./features";
-import { isWebsiteFolder } from "./vaultFolderTypes";
+import { isLettersFolderType, isWebsiteFolder } from "./vaultFolderTypes";
 import { query, formatRecord } from "./generic.server";
 import { getHumanById, getHumansById, isStaff, type Human } from "./humans.server";
 import { getOrganizationIdsWhereGuide, getOrganizationRole } from "./organizations.server";
@@ -186,10 +186,27 @@ export async function getProjectRoleForFolderId(
   return getProjectRole(project, humanId);
 }
 
+/** Whether a role writes in a folder of a project: `edit` (a Guide or a
+ * Crafter) everywhere but the Letters folder, where it is a Guide alone
+ * (Austin, 2026-11-05: Crafters and Observers are in the guides' house,
+ * "reading only"). Before that day a Crafter could edit, replace,
+ * rename, move and delete a letter, upload into the folder, and start a
+ * letter by putting a markdown file there, around the letters route's
+ * own refusal; this takes all of that away in the one function every
+ * write route already asks. Pure. */
+export function writesInFolder(
+  role: Pick<ResolvedProjectRole, "isOwner" | "guiding"> | null | undefined,
+  folder: Pick<VaultFolder, "folder_type">,
+): boolean {
+  if (!role) return false;
+  return isLettersFolderType(folder.folder_type) ? role.guiding : role.isOwner;
+}
+
 /**
  * Whether `actingHumanId` may change content (upload, create, rename,
  * move, delete, replace, publish) living in `folderId`, owned by
- * `ownerHumanId`. Inside a project it is the role: Owner or Crafter.
+ * `ownerHumanId`. Inside a project it is the role: Owner or Crafter, and
+ * in its Letters folder a Guide alone (`writesInFolder`).
  * Outside any project (someone's own `personal`, the `projects` root
  * itself) it is ownership.
  *
@@ -205,7 +222,7 @@ export async function canActAsProjectOwner(
   if (folderId) {
     const folder = await getFolderById(folderId);
     const project = folder ? await findOwningProjectFolder(folder) : null;
-    if (project) return !!(await getProjectRole(project, actingHumanId))?.isOwner;
+    if (project) return writesInFolder(await getProjectRole(project, actingHumanId), folder!);
     // Not a project at all — the other case this same "act as owner"
     // grant needs to cover: a folder/file under the `org` Vault Root
     // (e.g. `org/kanban-projects/`, garden/3-growing/
