@@ -85,6 +85,7 @@ import { button } from "stamps/button.css";
 import { surfaceBase } from "stamps/surface.css";
 import { link } from "stamps/link.css";
 import { textSize } from "stamps/typography.css";
+import { ORG_TERM } from "../data/orgBranding";
 import {
   getKnownAccounts,
   rememberAccount,
@@ -2271,7 +2272,7 @@ export default function Profile() {
                     {/* ── Organization (static, not editable here) ───── */}
                     <div className="flex flex-col gap-2">
                       <label className="purple-text font-bold text-sm">
-                        Organization
+                        {ORG_TERM}
                       </label>
                       <span>{organizationName}</span>
                     </div>
@@ -2503,7 +2504,7 @@ export default function Profile() {
               <h2 className="font-bold text-lg">Availability</h2>
               <p className="text-sm" style={{ color: "var(--text-subtle)", margin: 0 }}>
                 Your own weekly "professor's hours" — when you're generally available for a meeting. A future
-                meeting scheduler reads this (plus the Organization's own observed holidays) to offer real
+                meeting scheduler reads this (plus the {ORG_TERM}'s own observed holidays) to offer real
                 times; nothing books from it yet.
               </p>
               <div className={`${surfaceBase} p-4`}>

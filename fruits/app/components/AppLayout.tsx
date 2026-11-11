@@ -6,6 +6,7 @@ import { displayName } from "robustness-core/data/humanNames";
 import noLogoColor from "../images/no-logo-color.svg";
 import noLogoWhite from "../images/no-logo-white.svg";
 import { useSchemePref } from "../hooks/useSchemePref";
+import { ORG_TERM_SHORT } from "../data/orgBranding";
 import { HamburgerNeqIcon } from "stamps/HamburgerNeqIcon";
 import { navLink } from "stamps/navLink.css";
 import { textSize } from "stamps/typography.css";
@@ -117,7 +118,7 @@ function getCurrentSectionLabel(pathname: string, homeLabel: string): string {
   if (pathname.startsWith("/daily-log")) return "Daily Log";
   if (pathname.startsWith("/vault")) return "Vault";
   if (pathname.startsWith("/profile")) return "Profile";
-  if (pathname.startsWith("/org")) return "Org";
+  if (pathname.startsWith("/org")) return ORG_TERM_SHORT;
   if (pathname.startsWith("/maker")) return "Maker";
   return homeLabel;
 }
@@ -314,7 +315,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
         >
           <img src={noLogoColor} alt="" className={topbarLogoImg} />
           <span className={topbarNav} style={{ margin: 0 }}>
-            {["Daily Log", homeLabel, ...(showVault ? ["Vault"] : []), ...(showOrg ? ["Org"] : []), ...(showMaker ? ["Maker"] : [])].map((label) => (
+            {["Daily Log", homeLabel, ...(showVault ? ["Vault"] : []), ...(showOrg ? [ORG_TERM_SHORT] : []), ...(showMaker ? ["Maker"] : [])].map((label) => (
               <span key={label} className={`${navLink({ context: "topbar" })} ${navLinkFontClass}`}>
                 {label}
               </span>
@@ -371,7 +372,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                   `${navLink({ context: "topbar", active: isActive })} ${navLinkFontClass}`
                 }
               >
-                Org
+                {ORG_TERM_SHORT}
               </NavLink>
             )}
             {showMaker && <MakerNavDropdown items={makerItems} />}
@@ -460,7 +461,7 @@ export function AppLayout({ children }: { children?: ReactNode }) {
                   }
                   onClick={closeMenu}
                 >
-                  Org
+                  {ORG_TERM_SHORT}
                 </NavLink>
               )}
               {showMaker && (

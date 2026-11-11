@@ -55,11 +55,12 @@ import { button } from "stamps/button.css";
 import { textSize } from "stamps/typography.css";
 import { sprinkles } from "stamps/sprinkles.css";
 import { semanticColors } from "stamps/tokens";
+import { ORG_TERM, ORG_TERM_SHORT } from "../data/orgBranding";
 
-const DEFAULT_TITLE_NAME = "Org";
+const DEFAULT_TITLE_NAME = ORG_TERM_SHORT;
 
 export const meta: MetaFunction<typeof loader> = ({ data }) => [
-  { title: data ? `${data.organizationName} Organization` : `${DEFAULT_TITLE_NAME} Organization` },
+  { title: data ? `${data.organizationName} ${ORG_TERM}` : `${DEFAULT_TITLE_NAME} ${ORG_TERM}` },
 ];
 
 const subtle = { color: semanticColors.textSubtle };
@@ -568,7 +569,7 @@ export default function Org() {
         <Stack gap={8}>
           <Cluster gap={4} align="flex-start" style={{ justifyContent: "space-between" }}>
               <h1 className={`${textSize["2xl"]} ${sprinkles({ fontWeight: "bold", m: 0 })}`}>
-                {organizationName} Organization
+                {organizationName} {ORG_TERM}
               </h1>
             {isAdmin && (
               <button type="button" className={button({ variant: "secondary" })} onClick={() => setAddGuideOpen(true)}>
