@@ -61,7 +61,9 @@ import {
 import { BoxHardwareView } from "../components/BoxHardwareView";
 import { GROUPS, featuresOf, groupOf } from "robustness-core/data/features";
 import { ownLatestReading } from "robustness-core/data/dashboard.server";
+import { getCampsFolder, getFocusedCampFolderId, listCampsForAnchor } from "robustness-core/data/camps.server";
 import { navFor } from "../data/nav.server";
+import { CampMap, type CampMapEntry } from "../components/CampMap";
 import { SteepGauge } from "../components/SteepGauge";
 import { ProjectMailbox } from "../components/ProjectMailbox";
 import { AppLayout } from "../components/AppLayout";
@@ -261,6 +263,19 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   const suggestionsFor = decides ? ("all" as const) : !features.includes("feeds") ? { authorHumanId: user._id } : undefined;
   const suggestions = tab === "suggestions" ? await listSuggestions(folder._id, decides ? undefined : user._id) : null;
 
+  // Camp Map (garden/3-growing/camps-and-log-books.md) — every Camp
+  // anchored directly to this project, shown at the top of the page.
+  const camps = await listCampsForAnchor(folder);
+  const campsFolder = await getCampsFolder(folder);
+  const focusedCampFolderId = campsFolder ? await getFocusedCampFolderId(campsFolder) : null;
+  const campMapEntries: CampMapEntry[] = camps.map((c) => ({
+    folderId: c.folder._id,
+    name: c.name,
+    statement: c.statement,
+    targetArrival: c.targetArrival,
+    completed: c.completed,
+  }));
+
   // Children/README belong to the folder's OWNER, not necessarily the viewer
   // (this folder may only be reachable because it's shared with them).
   const project = await resolveProjectManifest(folder.human_id, folder);
@@ -358,6 +373,9 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
     // Sharing the Efforts page by link: Admin/Super only, on a project
     // (`newspaperShare.server.ts`). Null hides the control.
     share: isStaff(user) && (await isProjectFolder(folder)) ? { sharedAt: folder.newspaper_shared_at ?? null } : null,
+    campMapEntries,
+    focusedCampFolderId,
+    canManageCamps: canEdit,
   };
 }
 
@@ -534,7 +552,7 @@ function Logbook({
 }
 
 export default function NewspaperRoute() {
-  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, writesLetters, lettersAsClient, lettersAskHouse, letterStartFrom, mail, sensorData, boxHardwareData, seeding, budgetView, budget, budgetNames, canBudget, print } =
+  const { share, folder, project, canMark, canEdit, canReadLog, decides, suggestions, people, steep, openInVault, home, livePageHash, viewerId, marks, logs, tab, tabs, tabFolders, files, fileKinds, logbook, logbookFileIds, letters, manageLetters, writesLetters, lettersAsClient, lettersAskHouse, letterStartFrom, mail, sensorData, boxHardwareData, seeding, budgetView, budget, budgetNames, canBudget, print, campMapEntries, focusedCampFolderId, canManageCamps } =
     useLoaderData<typeof loader>();
   const navigate = useNavigate();
   const { manifest, body, galleryFolders, loadCellGraphs } = project;
@@ -756,6 +774,15 @@ export default function NewspaperRoute() {
             </Cluster>
           </Cluster>
         </Stack>
+        {(campMapEntries.length > 0 || canManageCamps) && (
+          <Stack gap={2} className={sprinkles({ mb: 8 })}>
+            <CampMap
+              camps={campMapEntries}
+              focusedCampFolderId={focusedCampFolderId}
+              newCampHref={canManageCamps ? `/camp/new?anchor=${folder._id}` : undefined}
+            />
+          </Stack>
+        )}
         <CardTabs tabs={tabs} active={tab} label="Project">
           {tab === "efforts" && print && (
             <PrintUpdate projectFolderId={folder._id} print={print} onPrinted={() => revalidator.revalidate()} />

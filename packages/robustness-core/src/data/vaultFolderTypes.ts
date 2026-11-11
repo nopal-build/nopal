@@ -110,6 +110,39 @@
  *    folders like `seeds → ready → growing → harvested` is the reference
  *    workflow this type productizes.
  *
+ * 4. Camp types (`CampFolderTypeKey`/`LogBookFolderTypeKey` — garden/
+ *    3-growing/camps-and-log-books.md) — a journey of sequential
+ *    goal-posts ("a place we are headed to"), each with its own running
+ *    journal. Two types, each used at TWO nesting depths via the same
+ *    inherit-from-parent denormalization every type already uses:
+ *      - `camp`: the grouping folder (`camps/`, `is_folder_type_root:
+ *        true`) and every numbered `camp-N/` folder inside it (inherited,
+ *        `is_folder_type_root: false`) share this one type — distinguished
+ *        by that flag, same way a `project-n02` container is told apart
+ *        from an ordinary descendant that merely inherited the type.
+ *        `camps/` is creatable directly inside a `project-n02` container
+ *        (a project, or Personal) or directly inside the `org` root —
+ *        the same two "belongs to something" contexts `kanban-garden`
+ *        allows, minus its third (`projects` root) since a Camp is never
+ *        a standalone top-level thing. UNLIKE `kanban-garden`: singleton
+ *        per parent (one journey of camps per Org/project/Personal, not
+ *        several side by side) — same singleton check `skills`/`syncs`
+ *        already use. `camp-N/README.md` carries the camp's own
+ *        `statement`/`target_arrival` front matter; an optional sibling
+ *        `OBSERVATIONS.md` (same front-matter shape, plus `arrival_date`)
+ *        marks that camp COMPLETE purely by existing — no separate status
+ *        field.
+ *      - `log-book`: a camp's own `log/` folder (`is_folder_type_root:
+ *        true`) and every numbered `entry-N/` folder inside it (inherited)
+ *        share this type. Creatable only directly inside a `camp` folder
+ *        that is NOT itself the `camps/` grouping root (i.e. inside an
+ *        actual `camp-N/`) — singleton per camp (one log book each).
+ *        `entry-N/README.md` carries `statement`/`entry_date`/
+ *        `edited_date` plus whatever asset files sit alongside it.
+ *    Both `writable: "owner"`/`shareable: true`/`publishable: false` —
+ *    the same three values `kanban-garden` uses, the closest existing
+ *    shape (ordered sub-folders, CLI-capable, not yet public).
+ *
  * This file has NO server-only imports — safe on both client and server,
  * same convention as `vaultRoots.ts`.
  */
@@ -138,11 +171,16 @@ export type SyncFolderTypeKey =
 
 export type KanbanFolderTypeKey = "kanban-garden";
 
+export type CampFolderTypeKey = "camp";
+export type LogBookFolderTypeKey = "log-book";
+
 export type VaultFolderTypeKey =
   | ContainerFolderTypeKey
   | SpaceFolderTypeKey
   | SyncFolderTypeKey
-  | KanbanFolderTypeKey;
+  | KanbanFolderTypeKey
+  | CampFolderTypeKey
+  | LogBookFolderTypeKey;
 
 export type VaultFolderTypeDef = {
   /** Display name in the "New folder" type picker and folder labels. */
@@ -367,11 +405,45 @@ export const KANBAN_FOLDER_TYPES: Record<KanbanFolderTypeKey, VaultFolderTypeDef
   },
 };
 
+/** `camp` — see this file's own header comment, item 4. Covers BOTH the
+ * `camps/` grouping folder (`is_folder_type_root: true`) and every
+ * numbered `camp-N/` folder inside it (inherited) — told apart by that
+ * flag, never a second type. Multi-context like `kanban-garden` (a
+ * `project-n02` container OR the `org` root), but SINGLETON per parent
+ * unlike it — one journey of camps per Org/project/Personal. */
+export const CAMP_FOLDER_TYPES: Record<CampFolderTypeKey, VaultFolderTypeDef> = {
+  camp: {
+    label: "Camp",
+    description:
+      "A sequential goal-post — a place we're headed to, with a target arrival date and its own log book. Grouped with every other camp for the same Org, project, or Personal space.",
+    writable: "owner",
+    shareable: true,
+    publishable: false,
+  },
+};
+
+/** `log-book` — see this file's own header comment, item 4. A camp's own
+ * running journal: the camp's `log/` folder (`is_folder_type_root: true`)
+ * and every numbered `entry-N/` folder inside it (inherited). Creatable
+ * only directly inside a `camp` folder that is itself NOT the `camps/`
+ * grouping root — singleton per camp. */
+export const LOG_BOOK_FOLDER_TYPES: Record<LogBookFolderTypeKey, VaultFolderTypeDef> = {
+  "log-book": {
+    label: "Log Book",
+    description: "A camp's own dated journal — one entry folder per sequential log entry, each with a statement and its own attachments.",
+    writable: "owner",
+    shareable: true,
+    publishable: false,
+  },
+};
+
 export const VAULT_FOLDER_TYPES: Record<VaultFolderTypeKey, VaultFolderTypeDef> = {
   ...CONTAINER_FOLDER_TYPES,
   ...SPACE_FOLDER_TYPES,
   ...SYNC_FOLDER_TYPES,
   ...KANBAN_FOLDER_TYPES,
+  ...CAMP_FOLDER_TYPES,
+  ...LOG_BOOK_FOLDER_TYPES,
 };
 
 export const CONTAINER_FOLDER_TYPE_KEYS = Object.keys(
@@ -386,6 +458,12 @@ export const SYNC_FOLDER_TYPE_KEYS = Object.keys(
 export const KANBAN_FOLDER_TYPE_KEYS = Object.keys(
   KANBAN_FOLDER_TYPES,
 ) as KanbanFolderTypeKey[];
+export const CAMP_FOLDER_TYPE_KEYS = Object.keys(
+  CAMP_FOLDER_TYPES,
+) as CampFolderTypeKey[];
+export const LOG_BOOK_FOLDER_TYPE_KEYS = Object.keys(
+  LOG_BOOK_FOLDER_TYPES,
+) as LogBookFolderTypeKey[];
 
 export function isVaultFolderTypeKey(value: unknown): value is VaultFolderTypeKey {
   return typeof value === "string" && value in VAULT_FOLDER_TYPES;
@@ -407,6 +485,14 @@ export function isSyncFolderTypeKey(value: unknown): value is SyncFolderTypeKey 
 
 export function isKanbanFolderTypeKey(value: unknown): value is KanbanFolderTypeKey {
   return typeof value === "string" && value in KANBAN_FOLDER_TYPES;
+}
+
+export function isCampFolderTypeKey(value: unknown): value is CampFolderTypeKey {
+  return typeof value === "string" && value in CAMP_FOLDER_TYPES;
+}
+
+export function isLogBookFolderTypeKey(value: unknown): value is LogBookFolderTypeKey {
+  return typeof value === "string" && value in LOG_BOOK_FOLDER_TYPES;
 }
 
 /** Whether a folder tagged with this type sits "under syncs" for the

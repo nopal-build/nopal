@@ -34,16 +34,20 @@ import {
   canWriteToFolderType,
   canonicalFolderType,
   CONTAINER_FOLDER_TYPES,
+  isCampFolderTypeKey,
   isContainerFolderTypeKey,
   isFolderTypePublishable,
   isFolderTypeShareable,
   isKanbanFolderTypeKey,
+  isLogBookFolderTypeKey,
   isSpaceFolderTypeKey,
   isSyncFamilyFolderType,
   isSyncFolderTypeKey,
   isVaultFolderTypeKey,
   isWebsiteFolder,
+  CAMP_FOLDER_TYPES,
   KANBAN_FOLDER_TYPES,
+  LOG_BOOK_FOLDER_TYPES,
   SPACE_FOLDER_TYPES,
   SYNC_FOLDER_TYPES,
   VAULT_FOLDER_TYPES,
@@ -648,6 +652,49 @@ export async function validateFolderTypeForParent(
 
     // Not singleton — any number of boards may exist side by side in a
     // given parent, unlike Space types above.
+    return null;
+  }
+
+  if (isCampFolderTypeKey(folderType)) {
+    const def = CAMP_FOLDER_TYPES[folderType];
+
+    // Same two "belongs to something" contexts `kanban-garden` allows,
+    // minus its third (the bare `projects` root) — a Camp is never a
+    // standalone top-level thing (garden/3-growing/camps-and-log-books.md).
+    const isProjectContainer = parent.folder_type === "project-n02" && parent.is_folder_type_root;
+    const isOrgRoot = !parent.parent_folder_id && parent.vault_root_key === "org";
+    if (!isProjectContainer && !isOrgRoot) {
+      return `${def.label} folders can only be created directly inside a project, your Personal space, or the Organization folder`;
+    }
+
+    // Singleton per parent, UNLIKE kanban-garden — one journey of camps
+    // per Org/project/Personal, not several side by side. Checked against
+    // the parent's own direct children only, same as Space types above
+    // (so an inherited `camp-N/` descendant never counts as a second
+    // `camps/` root).
+    const { folders: siblings } = await listFolderChildren(parent.human_id, parent._id);
+    if (siblings.some((f) => f.is_folder_type_root && f.folder_type === "camp")) {
+      return `A ${def.label}s folder already exists here`;
+    }
+    return null;
+  }
+
+  if (isLogBookFolderTypeKey(folderType)) {
+    const def = LOG_BOOK_FOLDER_TYPES[folderType];
+
+    // Directly inside an actual camp-N item, never the `camps/` grouping
+    // root itself — told apart from it by `is_folder_type_root` (the
+    // grouping folder DEFINES `camp`; a camp-N item only INHERITS it).
+    const isCampItem = parent.folder_type === "camp" && !parent.is_folder_type_root;
+    if (!isCampItem) {
+      return `${def.label} folders can only be created directly inside a Camp`;
+    }
+
+    // Singleton per camp — one log book each.
+    const { folders: siblings } = await listFolderChildren(parent.human_id, parent._id);
+    if (siblings.some((f) => f.is_folder_type_root && f.folder_type === "log-book")) {
+      return `A ${def.label} already exists here`;
+    }
     return null;
   }
 

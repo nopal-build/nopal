@@ -14,6 +14,7 @@ use nopal_core::sync_api::{self as core_sync_api, SyncApiColumn, SyncApiSchema};
 use nopal_core::vault::{Client as VaultClient, Folder as VaultFolder};
 
 mod auth;
+mod camp;
 mod garden;
 mod graphlog;
 mod image;
@@ -191,6 +192,13 @@ enum Command {
     Org {
         #[command(subcommand)]
         command: OrgCommand,
+    },
+    /// Camps + Log Books — sequential goal-posts ("a place we are headed
+    /// to"), each with its own running journal. See
+    /// `garden/3-growing/camps-and-log-books.md`.
+    Camp {
+        #[command(subcommand)]
+        command: CampCommand,
     },
     /// Reference docs for how to write things in Nopal (OxMarkdown syntax,
     /// the Vault, etc). Lists available skills by default.
@@ -869,6 +877,82 @@ enum OrgCommand {
 }
 
 #[derive(Debug, Subcommand)]
+enum CampCommand {
+    /// Creates the next sequential camp under an anchor's `Camps/`
+    /// folder (provisioning it on first use), and makes it the focused
+    /// camp.
+    Create {
+        /// A project, `personal`, or an Organization path to anchor the
+        /// camp under.
+        anchor: String,
+        #[arg(long)]
+        statement: String,
+        /// Target arrival date, e.g. 2026-12-01.
+        #[arg(long = "target-arrival")]
+        target_arrival: String,
+    },
+    /// Every camp under an anchor, in sequence order.
+    List {
+        /// A project, `personal`, or an Organization path.
+        anchor: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// One camp's statement, target arrival, main content, and
+    /// Observations (if recorded).
+    Show {
+        /// A camp's vault path, e.g. `projects/roadmap/Camps/camp-1`.
+        camp: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Records (or replaces) a camp's Observations — the one and only
+    /// thing that marks it complete.
+    Observe {
+        camp: String,
+        #[arg(long)]
+        statement: String,
+        /// Actual arrival date, e.g. 2026-12-03.
+        #[arg(long = "arrival-date")]
+        arrival_date: String,
+    },
+    /// A camp's Log Book — its running journal of dated entries.
+    Log {
+        #[command(subcommand)]
+        command: CampLogCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum CampLogCommand {
+    /// Adds the next sequential log entry, provisioning the camp's
+    /// `Log/` folder on first use.
+    Add {
+        /// A camp's vault path, e.g. `projects/roadmap/Camps/camp-1`.
+        camp: String,
+        #[arg(long)]
+        statement: String,
+        /// Defaults to today when omitted.
+        #[arg(long = "entry-date")]
+        entry_date: Option<String>,
+    },
+    /// Every entry in a camp's log book, oldest-first.
+    List {
+        camp: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// One log entry's statement, dates, content, and asset file names.
+    Show {
+        /// A log entry's vault path, e.g.
+        /// `projects/roadmap/Camps/camp-1/Log/entry-1`.
+        entry: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum PerfCommand {
     /// High-level stats across every traced route: request count, avg/p95/
     /// max duration, error count, by-route breakdown. The same numbers the
@@ -1294,6 +1378,35 @@ fn main() {
         Command::Org { command } => {
             let result = match command {
                 OrgCommand::Holidays { json } => org::holidays(json),
+            };
+            if let Err(e) = result {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        Command::Camp { command } => {
+            let result = match command {
+                CampCommand::Create {
+                    anchor,
+                    statement,
+                    target_arrival,
+                } => camp::create(&anchor, &statement, &target_arrival),
+                CampCommand::List { anchor, json } => camp::list(&anchor, json),
+                CampCommand::Show { camp, json } => camp::show(&camp, json),
+                CampCommand::Observe {
+                    camp,
+                    statement,
+                    arrival_date,
+                } => camp::observe(&camp, &statement, &arrival_date),
+                CampCommand::Log { command } => match command {
+                    CampLogCommand::Add {
+                        camp,
+                        statement,
+                        entry_date,
+                    } => camp::log_add(&camp, &statement, entry_date.as_deref()),
+                    CampLogCommand::List { camp, json } => camp::log_list(&camp, json),
+                    CampLogCommand::Show { entry, json } => camp::log_show(&entry, json),
+                },
             };
             if let Err(e) = result {
                 eprintln!("{e}");

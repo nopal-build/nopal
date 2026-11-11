@@ -37,6 +37,9 @@ import {
   type MeetingScheduler,
   type OrganizationHoliday,
 } from "robustness-core/data/organizations.server";
+import { getOrgRootFolder } from "robustness-core/data/vault.server";
+import { getCampsFolder, getFocusedCampFolderId, listCampsForAnchor } from "robustness-core/data/camps.server";
+import { CampMap, type CampMapEntry } from "../components/CampMap";
 import { newRecordId } from "robustness-core/data/generic.server";
 import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import type { Group } from "robustness-core/data/features";
@@ -128,6 +131,22 @@ export async function loader({ request }: LoaderFunctionArgs) {
           .map((h) => asOrgMember(h, roleByHumanId.get(h._id) ?? "Client")),
       }));
 
+      // Camp Map (garden/3-growing/camps-and-log-books.md) — `null`
+      // anchor/entries when the `org` Vault Root hasn't been provisioned
+      // yet (the "Ensure Org Kanban Board" admin script hasn't run),
+      // rather than failing the whole page.
+      const orgRootFolder = await getOrgRootFolder(NOPAL_ORGANIZATION_ID);
+      const camps = orgRootFolder ? await listCampsForAnchor(orgRootFolder) : [];
+      const campsFolder = orgRootFolder ? await getCampsFolder(orgRootFolder) : undefined;
+      const focusedCampFolderId = campsFolder ? await getFocusedCampFolderId(campsFolder) : null;
+      const campMapEntries: CampMapEntry[] = camps.map((c) => ({
+        folderId: c.folder._id,
+        name: c.name,
+        statement: c.statement,
+        targetArrival: c.targetArrival,
+        completed: c.completed,
+      }));
+
       return {
         user: { name: user.name ?? null, email: user.email, role: user.role },
         ...nav,
@@ -138,6 +157,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
         guides,
         addGuideCandidates,
         schedulers,
+        campMapEntries,
+        focusedCampFolderId,
+        campsAnchorFolderId: orgRootFolder?._id ?? null,
+        isGuide: guides.some((g) => g.id === user._id),
       };
     },
   );
@@ -558,10 +581,22 @@ function CreateSchedulerForm() {
 }
 
 export default function Org() {
-  const { organizationName, isAdmin, holidays, members, guides, addGuideCandidates, schedulers } =
-    useLoaderData<typeof loader>();
+  const {
+    organizationName,
+    isAdmin,
+    isGuide,
+    holidays,
+    members,
+    guides,
+    addGuideCandidates,
+    schedulers,
+    campMapEntries,
+    focusedCampFolderId,
+    campsAnchorFolderId,
+  } = useLoaderData<typeof loader>();
 
   const [addGuideOpen, setAddGuideOpen] = useState(false);
+  const canManageCamps = isAdmin || isGuide;
 
   return (
     <AppLayout>
@@ -577,6 +612,14 @@ export default function Org() {
               </button>
             )}
           </Cluster>
+
+          {campsAnchorFolderId && (
+            <CampMap
+              camps={campMapEntries}
+              focusedCampFolderId={focusedCampFolderId}
+              newCampHref={canManageCamps ? `/camp/new?anchor=${campsAnchorFolderId}` : undefined}
+            />
+          )}
 
           <Modal open={addGuideOpen} onClose={() => setAddGuideOpen(false)} title="Add a Guide">
             <Stack gap={3}>
