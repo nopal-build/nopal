@@ -45,6 +45,23 @@ supportedArchitectures:
 # copied alone into a Docker image.
 injectWorkspacePackages: true
 
+# `robustness-core`/`oxmarkdown-core` are injected (hard-linked copies, not
+# symlinks) per the setting above, needed for `pnpm deploy`'s standalone
+# prod builds (see that comment). A hard-linked copy does NOT pick up a
+# source change on a plain `pnpm install` re-run (e.g. after `git pull`
+# changes one of those packages), which left `fruits`/`webapp`/`worker`'s
+# local dev containers (`docker-compose.yml`) silently running stale core
+# code, or outright failing to resolve a newly added `exports` entry
+# ("Missing \"./data/x.server\" specifier in \"robustness-core\" package")
+# until someone noticed and force-reinstalled by hand. `dev` is every
+# service's own long-running dev script name (`fruits`/`webapp`'s
+# `node ./server.js`, `worker`'s `vite-node --watch worker.ts`) --
+# running it here keeps the injected copies synced against real source
+# for as long as that script keeps running, without disabling injection
+# (and breaking `pnpm deploy`) outright.
+syncInjectedDepsAfterScripts:
+  - dev
+
 # ffmpeg-static's download helper (`@derhuerst/http-basic`) declares
 # `@types/node@10` as a runtime dependency, and pnpm's default hoisting
 # put that ten-year-old typings package where TypeScript found it first,
