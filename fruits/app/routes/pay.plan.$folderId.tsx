@@ -110,7 +110,7 @@ function LinkForm({ label, returnUrl }: { label: string; returnUrl: string }) {
   return (
     <form onSubmit={submit}>
       <Stack gap={4}>
-        <PaymentElement options={{ layout: "tabs", paymentMethodOrder: ["us_bank_account", "card"] }} />
+        <PaymentElement options={{ layout: "tabs", paymentMethodOrder: ["us_bank_account", "card"], wallets: { link: "never" } }} />
         {error && (
           <p className={`${textSize.sm} ${sprinkles({ m: 0 })}`} style={{ color: semanticColors.textDanger }}>
             {error}

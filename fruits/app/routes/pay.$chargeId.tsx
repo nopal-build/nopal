@@ -104,7 +104,7 @@ function PayForm({ amount, returnUrl }: { amount: string; returnUrl: string }) {
   return (
     <form onSubmit={submit}>
       <Stack gap={4}>
-        <PaymentElement options={{ layout: "tabs", paymentMethodOrder: ["card", "us_bank_account"] }} />
+        <PaymentElement options={{ layout: "tabs", paymentMethodOrder: ["card", "us_bank_account"], wallets: { link: "never" } }} />
         {error && (
           <p className={`${textSize.sm} ${sprinkles({ m: 0 })}`} style={{ color: semanticColors.textDanger }}>
             {error}
