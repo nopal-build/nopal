@@ -8,7 +8,7 @@
  */
 import type { BillingCharge } from "robustness-core/data/billing.server";
 import { isOnHold, listPlanInvoices, type BillingPlan, type PlanInvoice } from "robustness-core/data/billingPlans.server";
-import { MENU_PLANS, MENU_PLAN_LABELS, addMonthsClamped, discountNote, type MenuPlan } from "robustness-core/data/billingRules";
+import { MENU_PLANS, MENU_PLAN_LABELS, addMonthsClamped, cardFeeCents, discountNote, type MenuPlan } from "robustness-core/data/billingRules";
 import { priceFor } from "robustness-core/data/stripe.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 import { displayName } from "robustness-core/data/humanNames";
@@ -70,7 +70,9 @@ export function buildLedger(input: {
     const planName = (level: MenuPlan) => `${MENU_PLAN_LABELS[level]} plan`;
     const amountAt = (at: Date) => {
       const level = p.pending_level && p.pending_at && at >= new Date(p.pending_at) ? p.pending_level : p.level!;
-      return { level, cents: input.prices.get(level) ?? null };
+      const list = input.prices.get(level) ?? null;
+      // What the month costs this plan: its price, and a credit card's fee.
+      return { level, cents: list == null ? null : list + cardFeeCents(list, p.pay_method, p.card_funding) };
     };
 
     if (isOnHold(p, now)) {
@@ -125,7 +127,7 @@ export async function loadLedger(input: {
     Promise.all(
       input.plans
         .filter((p) => p.stripe_subscription_id)
-        .map(async (p) => [p._id, await listPlanInvoices(p.stripe_subscription_id!, since).catch(() => [])] as const),
+        .map(async (p) => [p._id, await listPlanInvoices(p.stripe_subscription_id!, since, p.pay_method ?? "bank").catch(() => [])] as const),
     ),
     Promise.all(MENU_PLANS.map(async (l) => [l, (await priceFor(l).catch(() => null))?.unit_amount ?? null] as const)),
     getHumansById([

@@ -113,6 +113,68 @@ export function formatUsd(cents: number): string {
   })}`;
 }
 
+/** Which side of Stripe a key belongs to, by its prefix: a secret,
+ * restricted or publishable key, test or live. Null for anything else
+ * (unset, or a string that isn't a Stripe key). */
+export type StripeMode = "test" | "live";
+export function stripeKeyMode(key: string | null | undefined): StripeMode | null {
+  const m = /^(?:sk|rk|pk)_(test|live)_/.exec(key ?? "");
+  return m ? (m[1] as StripeMode) : null;
+}
+
+/** Every Stripe event the webhook acts on: the list production's
+ * endpoint subscribes to, which the preflight checks against Stripe. A
+ * test reads the two handlers' `case` lines and holds this list to them,
+ * so a handler added without its event here fails before it ships. */
+export const HANDLED_STRIPE_EVENTS = [
+  "payment_intent.processing",
+  "payment_intent.succeeded",
+  "payment_intent.payment_failed",
+  "payment_intent.canceled",
+  "setup_intent.succeeded",
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.paused",
+  "customer.subscription.resumed",
+  "customer.subscription.deleted",
+  "subscription_schedule.updated",
+  "subscription_schedule.completed",
+  "subscription_schedule.released",
+  "subscription_schedule.canceled",
+  "invoice.paid",
+  "invoice.payment_failed",
+] as const;
+
+/** How a plan is paid: the bank account or the card a Client linked. */
+export type PlanPayMethod = "bank" | "card";
+/** A linked card's kind, as Stripe reports it (`card.funding`). */
+export type CardFunding = "credit" | "debit" | "prepaid" | "unknown";
+
+/** Stripe's fee on a card payment, passed on to a plan paid by credit
+ * card (Austin, 2026-11-17). Stripe's published US rate: when Stripe
+ * changes it, somebody changes it here. It must stay under
+ * `CARD_FEE_CAP_PERCENT`, which a test holds for every plan price. */
+export const CARD_FEE_PERCENT = 2.9;
+export const CARD_FEE_FIXED_CENTS = 30;
+/** The most a US credit card may be surcharged (Stripe's surcharge page,
+ * read 2026-11-17: United States, credit cards only, 3%). */
+export const CARD_FEE_CAP_PERCENT = 3;
+
+/** The card fee on a month of a plan. Only a credit card pays one: the
+ * card networks bar a surcharge on debit and prepaid cards, a bank
+ * transfer has none, and a card whose kind Stripe can't tell is treated
+ * as not credit. Never over the cap, whatever the rate above says. */
+export function cardFeeCents(amountCents: number, method: PlanPayMethod | null | undefined, funding: CardFunding | null | undefined): number {
+  if (method !== "card" || funding !== "credit" || amountCents <= 0) return 0;
+  const fee = Math.round((amountCents * CARD_FEE_PERCENT) / 100) + CARD_FEE_FIXED_CENTS;
+  return Math.min(fee, Math.floor((amountCents * CARD_FEE_CAP_PERCENT) / 100));
+}
+
+/** "2.9% + 30¢", for the notice a Client reads before linking a card. */
+export function cardFeeRate(): string {
+  return `${CARD_FEE_PERCENT}% + ${CARD_FEE_FIXED_CENTS}¢`;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** `date` plus `months` calendar months, clamped to the month's last day

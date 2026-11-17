@@ -67,8 +67,8 @@ const STATE_LABEL: Record<LedgerState, string> = {
   resume: "Approve on the project",
   level: "Approve or decline on the project",
   waiting: "Sent, waiting",
-  due: "Debit due",
-  awaiting_bank: "Waiting for a bank link",
+  due: "Payment due",
+  awaiting_bank: "Waiting for a bank account or card",
   paid: "Paid",
   clearing: "Clearing",
 };

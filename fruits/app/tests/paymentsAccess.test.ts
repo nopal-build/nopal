@@ -39,6 +39,7 @@ vi.mock("robustness-core/data/fileFolders.server", () => ({
 
 import { attachableFiles, isClientOn, personFromPayLink, signedPayLink } from "../data/payments.server";
 import { assertTermsUsable, PAYMENT_TERMS } from "robustness-core/data/billingTerms";
+import { HANDLED_STRIPE_EVENTS, stripeKeyMode } from "robustness-core/data/billingRules";
 import { PAYMENT_CATEGORIES } from "robustness-core/data/billingRules";
 
 const folder = { _id: "madison-attic", name: "Madison Attic" } as never;
@@ -114,4 +115,35 @@ it("billing never charges a saved payment method off-session", () => {
     const src = readFileSync(resolve(__dirname, "../../../packages/robustness-core/src/data", file), "utf8");
     expect(src, file).not.toMatch(/off_session/);
   }
+});
+
+// Go-live guards (payments, 2026-11-17). Each was a line on a deploy list
+// for a person to remember; each is a check now.
+describe("which side of Stripe a server is on", () => {
+  it("only a key that says test is test mode: a live restricted key is refused draft terms too", () => {
+    const draft = (Object.keys(PAYMENT_TERMS) as (keyof typeof PAYMENT_TERMS)[]).find((c) => PAYMENT_TERMS[c].version.startsWith("draft-"));
+    if (!draft) return;
+    expect(() => assertTermsUsable(draft, "rk_live_x")).toThrow(/draft/);
+    expect(() => assertTermsUsable(draft, "something-else")).toThrow(/draft/);
+    expect(() => assertTermsUsable(draft, "rk_test_x")).not.toThrow();
+    expect(() => assertTermsUsable(draft, "")).not.toThrow();
+  });
+  it("reads a key's side from its prefix", () => {
+    expect(["sk_test_a", "rk_test_a", "pk_test_a"].map(stripeKeyMode)).toEqual(["test", "test", "test"]);
+    expect(["sk_live_a", "rk_live_a", "pk_live_a"].map(stripeKeyMode)).toEqual(["live", "live", "live"]);
+    expect([undefined, "", "whsec_a", "sk_a"].map(stripeKeyMode)).toEqual([null, null, null, null]);
+  });
+});
+
+it("the list of handled Stripe events is exactly the events the two handlers have a case for", () => {
+  const dir = resolve(__dirname, "../../../packages/robustness-core/src/data");
+  const cases = (file: string, fn: string) => {
+    const src = readFileSync(resolve(dir, file), "utf8");
+    const body = src.slice(src.indexOf(`export async function ${fn}(`));
+    const end = body.indexOf("\n}\n");
+    return [...body.slice(0, end).matchAll(/case "([a-z_]+\.[a-z_.]+)":/g)].map((m) => m[1]);
+  };
+  const handled = [...cases("billing.server.ts", "applyStripeEvent"), ...cases("billingPlans.server.ts", "applyPlanEvent")];
+  expect(handled.length).toBeGreaterThan(10);
+  expect([...handled].sort()).toEqual([...HANDLED_STRIPE_EVENTS].sort());
 });

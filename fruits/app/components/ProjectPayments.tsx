@@ -212,12 +212,12 @@ function GuidePlanControls({ plan, action }: { plan: PlanView; action: string })
     <Stack gap={2}>
       <Cluster gap={3} align="center">
         {plan.canPause && (
-          <button type="button" className={button({ variant: "secondary" })} disabled={busy} onClick={() => send("pause")}>
+          <button type="button" className={`${link} ${textSize.sm}`} disabled={busy} onClick={() => send("pause")}>
             Pause from the next billing date
           </button>
         )}
         {plan.canUndoPause && (
-          <button type="button" className={button({ variant: "secondary" })} disabled={busy} onClick={() => send("undo_pause")}>
+          <button type="button" className={`${link} ${textSize.sm}`} disabled={busy} onClick={() => send("undo_pause")}>
             Undo the pause
           </button>
         )}

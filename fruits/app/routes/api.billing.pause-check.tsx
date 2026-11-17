@@ -1,5 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { pauseCheck } from "robustness-core/data/billingPlans.server";
+import { stripeConfigured } from "robustness-core/data/stripe.server";
 import { sendPlanNotices } from "../data/billingNotices.server";
 
 /**
@@ -10,6 +11,11 @@ import { sendPlanNotices } from "../data/billingNotices.server";
  * guide hears. Each goes once per pause (`pauseCheck`). Protected by the
  * same CRON_SECRET as `api.vault.trash-cleanup.tsx` and wired into the
  * server's daily cron next to it (server.js).
+ *
+ * A server with no Stripe keys takes no payments, so it has nothing of
+ * its own to chase: it does nothing. That is what keeps staging, which
+ * runs on a copy of production's data with production's mail key and no
+ * Stripe keys, from emailing Clients about holds it only read about.
  *
  * The server calls itself on localhost, so the email links take
  * APP_BASE_URL, falling back to the production app.
@@ -30,6 +36,8 @@ export async function action({ request }: ActionFunctionArgs) {
   if (request.headers.get("Authorization") !== `Bearer ${cronSecret}`) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  if (!stripeConfigured()) return Response.json({ skipped: "Stripe isn't set up on this server" });
 
   const notices = await pauseCheck();
   await sendPlanNotices(notices, process.env.APP_BASE_URL || "https://o.nopal.build");

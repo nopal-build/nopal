@@ -133,3 +133,25 @@ describe("the terms' timing", () => {
     expect(day(cancelEffectiveAt(d("2026-12-04"), d("2026-11-03")))).toBe("2026-12-04");
   });
 });
+
+// The card fee (Austin, 2026-11-17). Only a credit card pays it, and it
+// never passes the cap a US credit card may be surcharged.
+import { CARD_FEE_CAP_PERCENT, cardFeeCents } from "robustness-core/data/billingRules";
+describe("the card fee on a plan", () => {
+  it("is Stripe's 2.9% + 30¢ on a credit card", () => {
+    expect(cardFeeCents(150000, "card", "credit")).toBe(4380);
+    expect(cardFeeCents(300000, "card", "credit")).toBe(8730);
+    expect(cardFeeCents(600000, "card", "credit")).toBe(17430);
+  });
+  it("is nothing on a debit card, a prepaid card, a card Stripe can't place, or a bank account", () => {
+    for (const funding of ["debit", "prepaid", "unknown", null] as const) expect(cardFeeCents(300000, "card", funding)).toBe(0);
+    expect(cardFeeCents(300000, "bank", null)).toBe(0);
+    expect(cardFeeCents(300000, "bank", "credit")).toBe(0);
+    expect(cardFeeCents(300000, null, null)).toBe(0);
+  });
+  it("stays under the surcharge cap at every plan price, and is held to it on a small amount", () => {
+    for (const cents of [150000, 300000, 600000]) expect(cardFeeCents(cents, "card", "credit")).toBeLessThanOrEqual((cents * CARD_FEE_CAP_PERCENT) / 100);
+    // $5: 2.9% + 30¢ would be 45¢, 9%; the cap makes it 15¢.
+    expect(cardFeeCents(500, "card", "credit")).toBe(15);
+  });
+});

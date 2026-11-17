@@ -1,6 +1,6 @@
 import type { ActionFunctionArgs } from "react-router";
 import { applyStripeEvent } from "robustness-core/data/billing.server";
-import { stripe } from "robustness-core/data/stripe.server";
+import { stripe, stripeMode } from "robustness-core/data/stripe.server";
 import { sendPlanNotices } from "../data/billingNotices.server";
 
 /**
@@ -15,8 +15,14 @@ import { sendPlanNotices } from "../data/billingNotices.server";
  * for are `sendPlanNotices`'s. Anything that throws while applying returns
  * 500 so Stripe retries it.
  *
- * Locally: `stripe listen --forward-to localhost:3001/api/stripe/webhook`
- * prints the STRIPE_WEBHOOK_SECRET to use.
+ * An event from the other side of Stripe (a live event on test keys, or
+ * the reverse) is acknowledged and ignored: its objects don't exist for
+ * this server's key, so applying it could only fail and be retried.
+ *
+ * Locally: `stripe listen --all-snapshot --forward-to
+ * localhost:3001/api/stripe/webhook` prints the STRIPE_WEBHOOK_SECRET to
+ * use. Production's endpoint subscribes to `HANDLED_STRIPE_EVENTS`
+ * (billingRules.ts); `scripts/stripe-preflight.ts` checks that it does.
  */
 export async function action({ request }: ActionFunctionArgs) {
   if (request.method !== "POST") {
@@ -39,6 +45,11 @@ export async function action({ request }: ActionFunctionArgs) {
   } catch (err) {
     console.warn("stripe-webhook: signature check failed", err instanceof Error ? err.message : err);
     return Response.json({ error: "Bad signature" }, { status: 400 });
+  }
+
+  if (event.livemode !== (stripeMode() === "live")) {
+    console.warn(`stripe-webhook: ignored ${event.type} ${event.id}, a ${event.livemode ? "live" : "test"} event on ${stripeMode() ?? "unreadable"} keys`);
+    return Response.json({ received: true, applied: false, ignored: "mode" });
   }
 
   try {

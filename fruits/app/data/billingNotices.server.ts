@@ -14,8 +14,10 @@ import { getHumansById } from "robustness-core/data/humans.server";
 import { displayName } from "robustness-core/data/humanNames";
 import { getProjectSharing, resolveRole } from "robustness-core/data/projectSharing.server";
 import { getFolderById } from "robustness-core/data/vault.server";
+import { getOrganizationMembers } from "robustness-core/data/organizations.server";
+import { GUIDING_ROLE } from "robustness-core/data/sharingRoles.server";
 import { getPlan, isOnHold, type BillingPlan, type PlanNotice } from "robustness-core/data/billingPlans.server";
-import { MENU_PLAN_LABELS, formatUsd } from "robustness-core/data/billingRules";
+import { MENU_PLAN_LABELS, cardFeeCents, formatUsd } from "robustness-core/data/billingRules";
 import { priceFor } from "robustness-core/data/stripe.server";
 import { groupOf } from "robustness-core/data/features";
 import { sendEmail } from "../util/email.server";
@@ -44,12 +46,34 @@ export function renewalLines(startIso: string | null, now = new Date()): string[
 }
 
 export const monthlyAmount = (cents: number) => `${formatUsd(cents)} a month`;
+/** A month's price as a credit card pays it: the card fee on top. */
+export const withCardFee = (cents: number) => cents + cardFeeCents(cents, "card", "credit");
+
+/** Who gets a project's guide mail: the guiding people on its list, and
+ * the Guides of the Organization that owns it. The precedence is
+ * `getProjectRole`'s: a person's entry on the list decides when its role
+ * is a group anyone knows (an org Guide the list names a Client gets no
+ * guide mail); an org Guide the list says nothing usable about is a
+ * guide here. Pure. */
+export function guideIdsFrom(sharing: readonly { human: string; role: string }[], orgGuideIds: readonly string[]): string[] {
+  const guiding = new Map<string, boolean>();
+  for (const entry of sharing) {
+    if (!guiding.has(entry.human) && groupOf(entry.role)) guiding.set(entry.human, resolveRole(entry.role).guiding);
+  }
+  for (const id of orgGuideIds) {
+    if (!guiding.has(id)) guiding.set(id, true);
+  }
+  return [...guiding.entries()].filter(([, is]) => is).map(([human]) => human);
+}
 
 async function guidesOn(folderId: string): Promise<Human[]> {
   const folder = await getFolderById(folderId);
   if (!folder) return [];
   const sharing = await getProjectSharing(folder);
-  return getHumansById(sharing.filter((e) => groupOf(e.role) && resolveRole(e.role).guiding).map((e) => e.human));
+  const orgGuides = folder.organization_id
+    ? (await getOrganizationMembers(folder.organization_id)).filter((m) => m.role === GUIDING_ROLE).map((m) => m.human_id)
+    : [];
+  return getHumansById(guideIdsFrom(sharing, orgGuides));
 }
 
 type Mail = {
@@ -77,9 +101,9 @@ async function mailFor(notice: PlanNotice, project: string, origin: string): Pro
           to: "clients",
           subject: `Set up the ${MENU_PLAN_LABELS[notice.level]} plan for ${project}`,
           lines: [
-            `${project} is on the ${MENU_PLAN_LABELS[notice.level]} plan: ${monthlyAmount(price.unit_amount ?? 0)} by bank transfer.`,
+            `${project} is on the ${MENU_PLAN_LABELS[notice.level]} plan: ${monthlyAmount(price.unit_amount ?? 0)}.`,
             ...renewalLines(plan?.start_date ?? null),
-            "Link the bank account it bills from to start. You can change the plan anytime on your profile.",
+            "Link a bank account or a card to start. You can change the plan anytime on your profile.",
           ],
           button: "plan-link",
         },
@@ -87,7 +111,10 @@ async function mailFor(notice: PlanNotice, project: string, origin: string): Pro
     }
     case "plan_started": {
       const price = await priceFor(notice.level);
-      const line = `The ${MENU_PLAN_LABELS[notice.level]} plan for ${project} has started: ${monthlyAmount(price.unit_amount ?? 0)}, renewing on ${renewalDay(notice.firstDebit)} of each month.`;
+      const plan = await getPlan(notice.folderId);
+      const fee = cardFeeCents(price.unit_amount ?? 0, plan?.pay_method, plan?.card_funding);
+      const amount = monthlyAmount((price.unit_amount ?? 0) + fee) + (fee ? `, which includes the ${formatUsd(fee)} credit card fee` : "");
+      const line = `The ${MENU_PLAN_LABELS[notice.level]} plan for ${project} has started: ${amount}, renewing on ${renewalDay(notice.firstDebit)} of each month.`;
       return [
         { to: "clients", subject: `${project}'s plan has started`, lines: [line, "You can change, pause or cancel it on your profile."], button: profile },
         { to: "guides", subject: `${project}'s plan has started`, lines: [line], button: maker },
@@ -96,11 +123,11 @@ async function mailFor(notice: PlanNotice, project: string, origin: string): Pro
     case "debit_moved": {
       const lines =
         notice.reason === "resume"
-          ? [`${project}'s plan is back on. ${formatUsd(notice.amountCents)} is debited today, then on this day each month.`]
+          ? [`${project}'s plan is back on. ${formatUsd(notice.amountCents)} is charged today, then on this day each month.`]
           : [`From ${billingDate(notice.date)}, ${project} is on the ${MENU_PLAN_LABELS[notice.level]} plan: ${formatUsd(notice.amountCents)} a month.`];
       return [
-        { to: "clients", subject: `${project}'s next debit`, lines, button: profile },
-        { to: "guides", subject: `${project}'s next debit`, lines, button: maker },
+        { to: "clients", subject: `${project}'s next payment`, lines, button: profile },
+        { to: "guides", subject: `${project}'s next payment`, lines, button: maker },
       ];
     }
     case "pause_scheduled":
@@ -175,10 +202,10 @@ async function mailFor(notice: PlanNotice, project: string, origin: string): Pro
       return [
         {
           to: "guides",
-          subject: `${project}'s debit didn't go through`,
+          subject: `${project}'s payment didn't go through`,
           lines: [
-            `The ${formatUsd(notice.amountCents)} debit for ${project} failed, and Stripe has stopped retrying. Nothing in O.No is locked.`,
-            "Worth a word with the client. They can link another account from their profile.",
+            `The ${formatUsd(notice.amountCents)} payment for ${project} failed, and Stripe has stopped retrying. Nothing in O.No is locked.`,
+            "Worth a word with the client. They can link another account or card from their profile.",
           ],
           button: maker,
         },
@@ -199,15 +226,15 @@ async function mailFor(notice: PlanNotice, project: string, origin: string): Pro
       const bill = notice.reason === "bill_overdue" ? await oldestOverdue(notice.folderId) : null;
       const why =
         notice.reason === "no_bank"
-          ? `${project}'s plan started on ${billingDate(notice.since)} and no bank account is linked yet`
+          ? `${project}'s plan started on ${billingDate(notice.since)} and no bank account or card is linked yet`
           : notice.reason === "debit_failed"
             ? `${project}'s plan payment didn't go through`
             : `A bill for ${project}${bill ? ` (${bill.label}, ${formatUsd(bill.amount_cents)})` : ""} was due on ${billingDate(notice.since)} and is still unpaid`;
       const fix =
         notice.reason === "no_bank"
-          ? "Link a bank account to pick back up. The first payment covers every month since the plan started."
+          ? "Link a bank account or a card to pick back up. The first payment covers every month since the plan started."
           : notice.reason === "debit_failed"
-            ? "Link another bank account on your profile to pick back up."
+            ? "Link another bank account or card on your profile to pick back up."
             : "Pay it to pick back up.";
       return [
         {
@@ -258,7 +285,10 @@ async function mailFor(notice: PlanNotice, project: string, origin: string): Pro
         {
           to: { human: plan.payer_human_id },
           subject: `Payment received: ${formatUsd(notice.amountCents)} for ${project}`,
-          lines: [`Your ${formatUsd(notice.amountCents)} payment for ${project}'s ${name} cleared. Thanks.`],
+          lines: [
+            `Your ${formatUsd(notice.amountCents)} payment for ${project}'s ${name} cleared. Thanks.`,
+            ...(plan.card_fee_cents ? [`That includes the ${formatUsd(plan.card_fee_cents)} credit card fee.`] : []),
+          ],
           button: profile,
         },
       ];
@@ -297,7 +327,7 @@ export async function sendPlanNotices(notices: PlanNotice[], origin: string): Pr
           const b = mail.button;
           const button =
             b === "plan-link"
-              ? { label: "Link a bank account", url: signedPlanLink(origin, folder._id, person._id) }
+              ? { label: "Link a bank account or card", url: signedPlanLink(origin, folder._id, person._id) }
               : b && "payChargeId" in b
                 ? { label: "Pay the bill", url: signedPayLink(origin, b.payChargeId, person._id) }
                 : b;
@@ -339,6 +369,7 @@ export function describePlan(plan: BillingPlan | null, audience: "guide" | "clie
   const status = plan?.status ?? "none";
   const name = plan?.level ? MENU_PLAN_LABELS[plan.level] : null;
   const amount = plan?.next_amount_cents != null ? formatUsd(plan.next_amount_cents) : null;
+  const fee = plan?.card_fee_cents ? `, including the ${formatUsd(plan.card_fee_cents)} credit card fee` : "";
   const on = (d: string | null) => (d ? billingDate(d) : "the next billing date");
   const renew = plan?.start_date ? `${renewalDay(plan.start_date)} of each month` : "the same day each month";
   let line: string;
@@ -346,11 +377,11 @@ export function describePlan(plan: BillingPlan | null, audience: "guide" | "clie
     case "awaiting_setup":
       line =
         audience === "guide"
-          ? `${name} plan, renewing on ${renew}. Waiting for a client to link a bank account.`
-          : `Your guide set up the ${name} plan, renewing on ${renew}. Link a bank account to start it.`;
+          ? `${name} plan, renewing on ${renew}. Waiting for a client to link a bank account or card.`
+          : `Your guide set up the ${name} plan, renewing on ${renew}. Link a bank account or a card to start it.`;
       break;
     case "active":
-      line = `${name}${amount ? `, ${amount} a month` : ""}. Next debit ${on(plan!.current_period_end)}.`;
+      line = `${name}${amount ? `, ${amount} a month${fee}` : ""}. Next payment ${on(plan!.current_period_end)}.`;
       if (plan!.pending_level) line += ` Moves to ${MENU_PLAN_LABELS[plan!.pending_level]} on ${on(plan!.pending_at)}.`;
       break;
     case "pause_scheduled":
@@ -369,7 +400,7 @@ export function describePlan(plan: BillingPlan | null, audience: "guide" | "clie
       line = "The plan has ended.";
       break;
     case "past_due":
-      line = `${name}. The last debit didn't go through, and Stripe is trying again.`;
+      line = `${name}. The last payment didn't go through, and Stripe is trying again.`;
       break;
     default:
       line = "No plan.";
@@ -381,7 +412,7 @@ export function describePlan(plan: BillingPlan | null, audience: "guide" | "clie
   if (isOnHold(plan)) {
     line =
       status === "awaiting_setup"
-        ? `Work on hold: no bank account linked since ${on(plan!.start_date)}. ${line}`
+        ? `Work on hold: no bank account or card linked since ${on(plan!.start_date)}. ${line}`
         : `Work on hold until the first payment clears. ${line}`;
   }
   return {

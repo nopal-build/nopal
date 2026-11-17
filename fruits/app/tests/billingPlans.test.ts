@@ -25,6 +25,10 @@ const fx = vi.hoisted(() => ({
   invoice: {} as Record<string, unknown>,
   pauseSchedules: [] as unknown[],
   subStatus: "active",
+  // What the linked payment method is, as Stripe would report it.
+  paymentMethod: { type: "us_bank_account" } as Record<string, unknown>,
+  // A card fee line already on the running plan's phase, in cents.
+  feeOnPhase: 0,
 }));
 
 vi.mock("robustness-core/data/generic.server", () => {
@@ -33,7 +37,15 @@ vi.mock("robustness-core/data/generic.server", () => {
     defineTable: async () => {},
     formatRecord: (r: unknown) => r,
     newRecordId: () => `r${store.size + 1}`,
-    query: async (sql: string) => {
+    query: async (sql: string, vars: { rec?: { tb: string; id: unknown }; at?: string } = {}) => {
+      // The say-it-once claim: set the field only if nothing has.
+      const claimed = /^UPDATE \$rec SET (\w+) = \$at WHERE/.exec(sql);
+      if (claimed && vars.rec) {
+        const row = store.get(key(vars.rec));
+        if (!row || row[claimed[1]] != null) return [[]];
+        store.set(key(vars.rec), { ...row, [claimed[1]]: vars.at });
+        return [[vars.rec]];
+      }
       if (sql.includes("billing_plans WHERE status")) {
         const rows = [...store.entries()]
           .filter(([k, v]) => k.startsWith("billing_plans:") && ["paused", "resume_requested", "awaiting_setup"].includes(String(v.status)))
@@ -61,6 +73,7 @@ vi.mock("robustness-core/data/stripe.server", () => {
   const fake = {
     customers: { create: async () => ({ id: "cus_1" }), update: async () => ({}) },
     setupIntents: { retrieve: async () => fx.setupIntent },
+    paymentMethods: { retrieve: async () => fx.paymentMethod },
     invoices: { retrieve: async () => fx.invoice },
     subscriptionSchedules: {
       create: async (params: Record<string, unknown>) => {
@@ -78,7 +91,13 @@ vi.mock("robustness-core/data/stripe.server", () => {
         end_behavior: "release",
         pause_schedules: fx.pauseSchedules,
         current_phase: { start_date: 1 },
-        phases: [{ start_date: 1, end_date: null, items: [{ price: price("guide") }] }],
+        phases: [
+          {
+            start_date: 1,
+            end_date: 999,
+            items: [{ price: price("guide") }, ...(fx.feeOnPhase ? [{ price: { id: "price_fee", product: "nopal_card_fee", unit_amount: fx.feeOnPhase } }] : [])],
+          },
+        ],
       }),
     },
     subscriptions: {
@@ -98,12 +117,14 @@ vi.mock("robustness-core/data/stripe.server", () => {
   return {
     stripe: () => fake,
     priceFor: async (level: string) => price(level),
-    RECURRING_METHODS: ["us_bank_account"],
+    RECURRING_METHODS: ["us_bank_account", "card"],
+    CARD_FEE_PRODUCT_ID: "nopal_card_fee",
+    ensureCardFeeProduct: async () => "nopal_card_fee",
     ONE_TIME_METHODS: ["card", "us_bank_account"],
   };
 });
 
-import { applyPlanEvent, approveLevelRequest, approveResume, declineLevelRequest, getPlan, isOnHold, pauseCheck, pausePlan, requestLevel, setPlanLevel } from "robustness-core/data/billingPlans.server";
+import { applyPlanEvent, approveLevelRequest, approveResume, cancelPlan, changePlan, declineLevelRequest, getPlan, isOnHold, pauseCheck, pausePlan, requestLevel, setPlanLevel } from "robustness-core/data/billingPlans.server";
 import { dayIn, firstBillingTime } from "robustness-core/data/billingRules";
 
 const TODAY = dayIn(new Date());
@@ -128,6 +149,8 @@ beforeEach(() => {
   calls.scheduleUpdates.length = 0;
   fx.pauseSchedules = [];
   fx.subStatus = "active";
+  fx.paymentMethod = { type: "us_bank_account" };
+  fx.feeOnPhase = 0;
 });
 
 describe("the guide picks a level", () => {
@@ -386,5 +409,124 @@ describe("a Client asks for a different level", () => {
     await requestLevel(await running(), "deep_guide", "sue");
     await setPlanLevel({ folderId: "attic", level: "light_guide", startDay: null });
     expect(plan()?.level_requested).toBeNull();
+  });
+});
+
+// A plan paid by card (Austin, 2026-11-17): a credit card pays Stripe's
+// card fee as its own line, a debit card and a bank account pay the plain
+// price. Stripe doesn't hold this rule for a subscription, so these do:
+// the fee line is on every phase a credit card pays, survives a change
+// and a cancel, and follows the payment method when it is switched.
+describe("a plan paid by card", () => {
+  const CREDIT = { type: "card", card: { funding: "credit" } };
+  const DEBIT = { type: "card", card: { funding: "debit" } };
+  type Item = { price?: string; price_data?: { unit_amount: number; product: string; recurring: { interval: string } } };
+  const itemsOf = (phase: unknown) => (phase as { items: Item[] }).items;
+  const feeOf = (phase: unknown) => itemsOf(phase).find((i) => i.price_data)?.price_data?.unit_amount ?? itemsOf(phase).some((i) => i.price === "price_fee");
+  const start = async (method: Record<string, unknown>) => {
+    await setPlanLevel({ folderId: "attic", level: "guide", startDay: TODAY });
+    fx.paymentMethod = method;
+    await linked();
+    return (await getPlan("attic"))!;
+  };
+  const switchTo = (method: Record<string, unknown>) => {
+    fx.paymentMethod = method;
+    fx.setupIntent = { id: "seti_switch", status: "succeeded", customer: "cus_1", payment_method: "pm_new", metadata: { project_folder_id: "attic", payer_human_id: "sue", purpose: "bank" } };
+    return applyPlanEvent(event("setup_intent.succeeded", { id: "seti_switch" }));
+  };
+
+  it("a credit card starts the plan with the card fee as a second monthly line", async () => {
+    const p = await start(CREDIT);
+    const [phase] = calls.scheduleCreates[0].phases as unknown[];
+    expect(itemsOf(phase)).toEqual([
+      { price: "price_guide" },
+      { price_data: { currency: "usd", product: "nopal_card_fee", recurring: { interval: "month" }, unit_amount: 8730 } },
+    ]);
+    expect(calls.subscriptionUpdates[0]).toMatchObject({ payment_settings: { payment_method_types: ["card"] } });
+    expect(p).toMatchObject({ pay_method: "card", card_funding: "credit", next_amount_cents: 308730, card_fee_cents: 8730 });
+  });
+
+  it("a debit card starts it at the plain price", async () => {
+    const p = await start(DEBIT);
+    expect(itemsOf((calls.scheduleCreates[0].phases as unknown[])[0])).toEqual([{ price: "price_guide" }]);
+    expect(calls.subscriptionUpdates[0]).toMatchObject({ payment_settings: { payment_method_types: ["card"] } });
+    expect(p).toMatchObject({ pay_method: "card", card_funding: "debit", next_amount_cents: 300000, card_fee_cents: 0 });
+  });
+
+  it("a bank account starts it at the plain price", async () => {
+    const p = await start({ type: "us_bank_account" });
+    expect(itemsOf((calls.scheduleCreates[0].phases as unknown[])[0])).toEqual([{ price: "price_guide" }]);
+    expect(p).toMatchObject({ pay_method: "bank", next_amount_cents: 300000 });
+  });
+
+  it("a level change keeps the fee on the month still running and puts the new level's fee on the next", async () => {
+    const p = await start(CREDIT);
+    fx.feeOnPhase = 8730;
+    const notices = await changePlan(p, "deep_guide");
+    const phases = calls.scheduleUpdates.at(-1)!.phases as unknown[];
+    expect(itemsOf(phases[0])).toEqual([{ price: "price_guide" }, { price: "price_fee" }]);
+    expect(itemsOf(phases[1])[0]).toEqual({ price: "price_deep_guide" });
+    expect(feeOf(phases[1])).toBe(17430);
+    expect(notices[0]).toMatchObject({ type: "debit_moved", amountCents: 617430 });
+  });
+
+  it("a cancel keeps the fee on the months left", async () => {
+    const p = await start(CREDIT);
+    fx.feeOnPhase = 8730;
+    await cancelPlan(p);
+    const phases = calls.scheduleUpdates.at(-1)!.phases as unknown[];
+    expect(itemsOf(phases[0])).toEqual([{ price: "price_guide" }, { price: "price_fee" }]);
+  });
+
+  it("switching from a bank account to a credit card adds the fee, on the same dates", async () => {
+    await start({ type: "us_bank_account" });
+    await switchTo(CREDIT);
+    const update = calls.scheduleUpdates.find((u) => u.phases)!;
+    const [phase] = update.phases as { start_date: number; end_date: number }[];
+    expect(feeOf(phase)).toBe(8730);
+    expect(phase).toMatchObject({ start_date: 1, end_date: 999 });
+    expect(update.proration_behavior).toBe("none");
+    expect(calls.subscriptionUpdates.at(-1)).toMatchObject({ default_payment_method: "pm_new", payment_settings: { payment_method_types: ["card"] } });
+    expect(plan()).toMatchObject({ pay_method: "card", card_funding: "credit", card_fee_cents: 8730 });
+  });
+
+  it("switching from a credit card to a bank account takes the fee off", async () => {
+    await start(CREDIT);
+    fx.feeOnPhase = 8730;
+    await switchTo({ type: "us_bank_account" });
+    const update = calls.scheduleUpdates.find((u) => u.phases)!;
+    expect(itemsOf((update.phases as unknown[])[0])).toEqual([{ price: "price_guide" }]);
+    expect(plan()).toMatchObject({ pay_method: "bank", card_fee_cents: 0 });
+  });
+
+  it("a switch that stopped halfway is finished when Stripe sends the event again", async () => {
+    await start(CREDIT);
+    fx.feeOnPhase = 8730;
+    // The row already says debit (the first pass got that far), the
+    // schedule still carries the fee.
+    store.set("billing_plans:attic", { ...plan(), pay_method: "card", card_funding: "debit" });
+    await switchTo(DEBIT);
+    const update = calls.scheduleUpdates.find((u) => u.phases)!;
+    expect(itemsOf((update.phases as unknown[])[0])).toEqual([{ price: "price_guide" }]);
+  });
+
+  it("switching between two that pay no fee leaves the schedule's phases alone", async () => {
+    await start({ type: "us_bank_account" });
+    await switchTo(DEBIT);
+    expect(calls.scheduleUpdates.some((u) => u.phases)).toBe(false);
+    expect(plan()).toMatchObject({ pay_method: "card", card_funding: "debit" });
+  });
+});
+
+describe("a plan after a plan", () => {
+  it("a plan set on a project whose last one ended starts when a Client links", async () => {
+    await setPlanLevel({ folderId: "attic", level: "guide", startDay: TODAY });
+    await linked();
+    store.set("billing_plans:attic", { ...plan(), status: "canceled" });
+    await setPlanLevel({ folderId: "attic", level: "light_guide", startDay: TODAY });
+    expect(plan()).toMatchObject({ status: "awaiting_setup", stripe_schedule_id: null, stripe_subscription_id: null });
+    await linked("tom");
+    expect(calls.scheduleCreates).toHaveLength(2);
+    expect(plan()).toMatchObject({ status: "active", payer_human_id: "tom" });
   });
 });

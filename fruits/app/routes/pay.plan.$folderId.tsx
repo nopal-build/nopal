@@ -1,9 +1,10 @@
 // app/routes/pay.plan.$folderId.tsx → /pay/plan/:folderId
-// Where a Client links the bank account a project's plan bills from
-// (payments seed): Stripe's form for a bank transfer (ACH) only, which
-// carries Stripe's own mandate wording, with the plan's terms above it.
-// Linking is the authorization and the acceptance. `?bank=1` replaces the
-// account a running plan bills from. Any Client on the project, logged in
+// Where a Client links what a project's plan is paid from (payments
+// seed): Stripe's form for a bank transfer (ACH) or a card, which carries
+// Stripe's own mandate wording, with the plan's terms below it. A credit
+// card adds the card fee, and the page says what each way costs before
+// anything is linked (Austin, 2026-11-17). Linking is the authorization
+// and the acceptance. `?bank=1` replaces what a running plan is paid from. Any Client on the project, logged in
 // or through their emailed link; anyone else gets a 404.
 import { useEffect, useState, type FormEvent } from "react";
 import type { LoaderFunctionArgs, MetaFunction } from "react-router";
@@ -13,9 +14,9 @@ import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-
 import { getUser } from "../modules/auth/auth.server";
 import { navFor } from "../data/nav.server";
 import { isClientOn, personFromPlanLink } from "../data/payments.server";
-import { monthlyAmount, renewalLines } from "../data/billingNotices.server";
+import { monthlyAmount, renewalLines, withCardFee } from "../data/billingNotices.server";
 import { getPlan, isOnHold, setupIntentSecretFor, RUNNING } from "robustness-core/data/billingPlans.server";
-import { MENU_PLAN_LABELS } from "robustness-core/data/billingRules";
+import { MENU_PLAN_LABELS, cardFeeRate, formatUsd } from "robustness-core/data/billingRules";
 import { TERMS_PREAMBLE, termsAreDraft, termsFor } from "robustness-core/data/billingTerms";
 import { priceFor, stripe } from "robustness-core/data/stripe.server";
 import { getFolderById } from "robustness-core/data/vault.server";
@@ -79,6 +80,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ? {
           name: MENU_PLAN_LABELS[level],
           amount: monthlyAmount(price?.unit_amount ?? 0),
+          byCard: `Paying by credit card adds a ${cardFeeRate()} fee (${formatUsd(withCardFee(price?.unit_amount ?? 0) - (price?.unit_amount ?? 0))} a month). Bank transfer (ACH) has no fee.`,
           starts: renewalLines(plan?.start_date ?? null).join(" "),
         }
       : null,
@@ -108,14 +110,14 @@ function LinkForm({ label, returnUrl }: { label: string; returnUrl: string }) {
   return (
     <form onSubmit={submit}>
       <Stack gap={4}>
-        <PaymentElement />
+        <PaymentElement options={{ layout: "tabs", paymentMethodOrder: ["us_bank_account", "card"] }} />
         {error && (
           <p className={`${textSize.sm} ${sprinkles({ m: 0 })}`} style={{ color: semanticColors.textDanger }}>
             {error}
           </p>
         )}
         <p className={`${textSize.sm} ${sprinkles({ m: 0 })}`} style={{ color: semanticColors.textSubtle }}>
-          By linking this account you agree to the contract terms and conditions below.
+          By linking it you agree to the contract terms and conditions below.
         </p>
         <button type="submit" className={button({ variant: "primary" })} disabled={!stripe || busy}>
           {busy ? "Linking…" : label}
@@ -142,7 +144,12 @@ export default function PlanSetup() {
           {plan ? `${plan.name} plan, ${plan.amount}` : "Plan"}
         </h1>
         {plan && purpose === "setup" && !linked && <p className={sprinkles({ m: 0 })}>{plan.starts}</p>}
-        {purpose === "bank" && !linked && <p className={sprinkles({ m: 0 })}>Link the account the plan bills from from now on.</p>}
+        {purpose === "bank" && !linked && <p className={sprinkles({ m: 0 })}>Link the bank account or card the plan is paid from from now on.</p>}
+        {plan && !linked && clientSecret && (
+          <p className={`${textSize.sm} ${sprinkles({ m: 0 })}`} style={{ color: semanticColors.textSubtle }}>
+            {plan.byCard}
+          </p>
+        )}
       </Stack>
       {onHold && (
         <Surface className={sprinkles({ p: 4 })}>
@@ -150,12 +157,12 @@ export default function PlanSetup() {
             {!clientSecret
               ? "Work on this project is on hold until the payment clears. That takes a few days by bank transfer, and you'll get an email when it's back on."
               : purpose === "bank"
-                ? "Work on this project is on hold because the plan's last payment didn't go through. Link another account and it's tried again."
-                : "Work on this project is on hold until a bank account is linked. The first payment covers every month since the plan started."}
+                ? "Work on this project is on hold because the plan's last payment didn't go through. Link another account or card and it's tried again."
+                : "Work on this project is on hold until a bank account or card is linked. The first payment covers every month since the plan started."}
           </p>
         </Surface>
       )}
-      {linked === "done" && <p>Linked. You'll get an email with the date of the first debit.</p>}
+      {linked === "done" && <p>Linked. You'll get an email with the date of the first payment.</p>}
       {linked === "verifying" && (
         <p>Stripe is checking the account with two small deposits. Watch your email from Stripe, then confirm them, and the plan starts.</p>
       )}
@@ -164,7 +171,7 @@ export default function PlanSetup() {
           <Surface className={sprinkles({ p: 4 })}>
             {stripePromise ? (
               <Elements stripe={stripePromise} options={{ clientSecret }}>
-                <LinkForm label={purpose === "bank" ? "Use this account" : "Link and start the plan"} returnUrl={returnUrl} />
+                <LinkForm label={purpose === "bank" ? "Use this from now on" : "Link and start the plan"} returnUrl={returnUrl} />
               </Elements>
             ) : (
               <p className={textSize.sm}>Loading the form…</p>

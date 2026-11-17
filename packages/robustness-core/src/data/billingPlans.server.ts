@@ -12,13 +12,21 @@
  *
  * The flow:
  * 1. The guide picks a level → `awaiting_setup`. The app emails the Clients.
- * 2. A Client links a bank account on `/pay/plan/<folderId>`: a SetupIntent
- *    for bank transfer (ACH) only, which carries Stripe's mandate and the
- *    subscription terms. Confirming it is the authorization and acceptance.
+ * 2. A Client links a bank account or a card on `/pay/plan/<folderId>`:
+ *    a SetupIntent, which carries Stripe's mandate and the subscription
+ *    terms. Confirming it is the authorization and acceptance.
  * 3. `setup_intent.succeeded` starts the schedule on the first billing day.
  *
- * Nothing here charges a saved bank account outside the plan's own monthly
- * debit; one-off bills are always a fresh payment the Client confirms
+ * A plan paid by credit card carries Stripe's card fee as a second line
+ * on every phase (Austin, 2026-11-17; `cardFeeCents`). Stripe's own
+ * surcharge support doesn't reach subscriptions, so the rule is held
+ * here: the fee line is added only by `itemsFor`, a phase that is resent
+ * unchanged goes through `itemsOf` (cards.md: an update that replaces a
+ * list whole drops whatever you didn't resend), and a new payment method
+ * rebuilds every phase (`applyPayMethod`).
+ *
+ * Nothing here charges a saved bank account or card outside the plan's
+ * own monthly payment; one-off bills are always a fresh payment the Client confirms
  * (cards.md: a stored mandate is not an authorization for a debit outside
  * the pattern).
  *
@@ -32,16 +40,19 @@ import {
   MENU_PLANS,
   billDueAt,
   cancelEffectiveAt,
+  cardFeeCents,
   firstBillingTime,
   holdStartsAt,
   isSettableFirstBillingDay,
   lookupKeyFor,
   pauseMilestone,
   planChangeEffectiveAt,
+  type CardFunding,
   type MenuPlan,
+  type PlanPayMethod,
 } from "./billingRules";
 import { assertTermsUsable, termsFor } from "./billingTerms";
-import { RECURRING_METHODS, priceFor, stripe } from "./stripe.server";
+import { CARD_FEE_PRODUCT_ID, RECURRING_METHODS, ensureCardFeeProduct, priceFor, stripe } from "./stripe.server";
 import { ensureCustomer } from "./billing.server";
 import { billOnHold, isOnHold } from "./planHold.server";
 
@@ -79,7 +90,14 @@ export type BillingPlan = Data & {
   stripe_subscription_id: string | null;
   stripe_schedule_id: string | null;
   current_period_end: string | null;
+  /** The next payment, card fee included. */
   next_amount_cents: number | null;
+  /** The card fee inside `next_amount_cents`; 0 or null when there is none. */
+  card_fee_cents?: number | null;
+  /** What the plan is paid from, read from Stripe when it is linked. Only
+   * a credit card pays the card fee. */
+  pay_method?: PlanPayMethod | null;
+  card_funding?: CardFunding | null;
   /** A plan change waiting for its billing date. */
   pending_level: MenuPlan | null;
   pending_at: string | null;
@@ -137,9 +155,42 @@ const OPEN_ENDED = { duration: { interval: "year" as const, interval_count: 10 }
 const iso = (unix: number) => new Date(unix * 1000).toISOString();
 
 type Phase = Stripe.SubscriptionSchedule.Phase;
+type PriceRef = string | Stripe.Price | Stripe.DeletedPrice | null | undefined;
 const idOf = (x: string | { id: string } | null | undefined) => (typeof x === "string" ? x : (x?.id ?? null));
-const priceIdOf = (phase: Phase) => idOf(phase.items[0].price) as string;
 const unix = (date: Date) => Math.floor(date.getTime() / 1000);
+
+/** Whether a price is the card fee line. Needs the price expanded. */
+const isFeePrice = (price: PriceRef) =>
+  typeof price === "object" && !!price && "product" in price && idOf(price.product as string | { id: string }) === CARD_FEE_PRODUCT_ID;
+/** A phase's plan price (not its card fee). Needs prices expanded. */
+const planPriceOf = (phase: Phase) => (phase.items.find((i) => !isFeePrice(i.price)) ?? phase.items[0]).price;
+const priceIdOf = (phase: Phase) => idOf(planPriceOf(phase) as string | { id: string }) as string;
+
+type PayMethod = Pick<BillingPlan, "pay_method" | "card_funding">;
+type PhaseItem = Stripe.SubscriptionScheduleUpdateParams.Phase.Item;
+
+/** A phase's lines exactly as they stand, for an update that keeps the
+ * phase: the plan's price and, when it has one, its card fee. */
+const itemsOf = (phase: Phase): PhaseItem[] => phase.items.map((i) => ({ price: idOf(i.price as string | { id: string }) as string }));
+
+/** The lines of a phase at a price, for how the plan is paid: the plan's
+ * price, and for a credit card the card fee on it. The one place a fee
+ * line is made. */
+async function itemsFor(price: Stripe.Price, pay: PayMethod): Promise<PhaseItem[]> {
+  const fee = cardFeeCents(price.unit_amount ?? 0, pay.pay_method, pay.card_funding);
+  if (!fee) return [{ price: price.id }];
+  return [
+    { price: price.id },
+    { price_data: { currency: "usd", product: await ensureCardFeeProduct(), recurring: { interval: "month" }, unit_amount: fee } },
+  ];
+}
+
+/** What a linked payment method is, from Stripe. */
+async function payMethodOf(paymentMethodId: string): Promise<{ pay: Required<PayMethod>; type: "card" | "us_bank_account" }> {
+  const pm = await stripe().paymentMethods.retrieve(paymentMethodId);
+  if (pm.type === "card") return { type: "card", pay: { pay_method: "card", card_funding: (pm.card?.funding as CardFunding | undefined) ?? "unknown" } };
+  return { type: "us_bank_account", pay: { pay_method: "bank", card_funding: null } };
+}
 
 function emptyPlan(): Omit<BillingPlan, "id" | "_id"> {
   return {
@@ -153,6 +204,9 @@ function emptyPlan(): Omit<BillingPlan, "id" | "_id"> {
     stripe_schedule_id: null,
     current_period_end: null,
     next_amount_cents: null,
+    card_fee_cents: null,
+    pay_method: null,
+    card_funding: null,
     pending_level: null,
     pending_at: null,
     pause_at: null,
@@ -230,8 +284,12 @@ export async function setPlanLevel(input: {
     }
     const startDate = firstBillingTime(input.startDay).toISOString();
     const asked = plan?.status === "awaiting_setup" && plan.level === input.level && plan.start_date === startDate;
-    // A new day from the guide is a fresh start: any hold lifts.
-    await savePlan(input.folderId, { status: "awaiting_setup", level: input.level, start_date: startDate, hold_since: null });
+    // A new day from the guide is a fresh start: any hold lifts. A plan
+    // set after one that ended is a new plan: what the old one ran on
+    // in Stripe is let go, or the link that should start this one would
+    // read as a plan already started.
+    const fresh = plan && SETTLED.includes(plan.status) ? { stripe_subscription_id: null, stripe_schedule_id: null, payer_human_id: null, pay_method: null, card_funding: null, card_fee_cents: null, past_due_since: null } : {};
+    await savePlan(input.folderId, { status: "awaiting_setup", level: input.level, start_date: startDate, hold_since: null, ...fresh });
     return asked ? [] : [{ type: "setup_requested", folderId: input.folderId, level: input.level }];
   }
   if (!input.level) return cancelPlan(plan, input.now ?? new Date());
@@ -307,7 +365,7 @@ export async function requestLevel(plan: BillingPlan, level: MenuPlan, byHumanId
 export async function changePlan(plan: BillingPlan, level: MenuPlan, now = new Date()): Promise<PlanNotice[]> {
   if (!plan.stripe_schedule_id || !plan.stripe_subscription_id) throw new Error("This plan hasn't started");
   if (plan.status === "paused" || plan.status === "resume_requested") throw new Error("Resume the plan before changing it");
-  const schedule = await stripe().subscriptionSchedules.retrieve(plan.stripe_schedule_id);
+  const schedule = await stripe().subscriptionSchedules.retrieve(plan.stripe_schedule_id, { expand: ["phases.items.price"] });
   const sub = await stripe().subscriptions.retrieve(plan.stripe_subscription_id);
   const current = schedule.phases.find((p) => p.start_date === schedule.current_phase?.start_date) ?? schedule.phases[0];
   const currentPriceId = priceIdOf(current);
@@ -317,7 +375,7 @@ export async function changePlan(plan: BillingPlan, level: MenuPlan, now = new D
   if (newPrice.id === currentPriceId) {
     // Back to what bills now: drop any waiting change.
     await stripe().subscriptionSchedules.update(schedule.id, {
-      phases: [{ items: [{ price: currentPriceId }], start_date: current.start_date, metadata, ...OPEN_ENDED }],
+      phases: [{ items: itemsOf(current), start_date: current.start_date, metadata, ...OPEN_ENDED }],
       proration_behavior: "none",
     });
     await savePlan(plan._id, NO_LEVEL_REQUEST);
@@ -328,8 +386,8 @@ export async function changePlan(plan: BillingPlan, level: MenuPlan, now = new D
   const effective = planChangeEffectiveAt(new Date(sub.items.data[0].current_period_end * 1000), now);
   await stripe().subscriptionSchedules.update(schedule.id, {
     phases: [
-      { items: [{ price: currentPriceId }], start_date: current.start_date, end_date: unix(effective), metadata },
-      { items: [{ price: newPrice.id }], start_date: unix(effective), metadata, ...OPEN_ENDED },
+      { items: itemsOf(current), start_date: current.start_date, end_date: unix(effective), metadata },
+      { items: await itemsFor(newPrice, plan), start_date: unix(effective), metadata, ...OPEN_ENDED },
     ],
     proration_behavior: "none",
   });
@@ -341,7 +399,7 @@ export async function changePlan(plan: BillingPlan, level: MenuPlan, now = new D
       folderId: plan._id,
       level,
       date: effective.toISOString(),
-      amountCents: newPrice.unit_amount ?? 0,
+      amountCents: (newPrice.unit_amount ?? 0) + cardFeeCents(newPrice.unit_amount ?? 0, plan.pay_method, plan.card_funding),
       reason: "change",
     },
   ];
@@ -396,7 +454,7 @@ export async function cancelPlan(plan: BillingPlan, now = new Date()): Promise<P
     end_behavior: "cancel",
     phases: [
       {
-        items: [{ price: priceIdOf(current) }],
+        items: itemsOf(current),
         start_date: current.start_date,
         end_date: end,
         metadata: { project_folder_id: plan._id },
@@ -410,8 +468,9 @@ export async function cancelPlan(plan: BillingPlan, now = new Date()): Promise<P
 }
 
 /** The setup page's client secret: this Client's own SetupIntent for a
- * bank account, which carries Stripe's ACH mandate. `purpose` "bank"
- * replaces the account a running plan debits. */
+ * bank account or a card, which carries Stripe's mandate. `purpose`
+ * "bank" replaces what a running plan is paid from (the name is from
+ * when a plan was bank transfer only; it covers a card too). */
 export async function setupIntentSecretFor(
   plan: BillingPlan,
   payer: { _id: string; email: string; name?: string | null },
@@ -453,8 +512,43 @@ export async function setupIntentSecretFor(
 
 // ─── From Stripe ────────────────────────────────────────────────────────
 
-/** A bank account is linked: start the plan, or switch a running plan's
- * debits to the new account. */
+/** A running plan is paid from something new: say so on the subscription,
+ * and rebuild every phase from the current one on, so the card fee is on
+ * exactly the phases a credit card pays and on none a bank or a debit
+ * card does. Dates, the pause and the ending are left as they are. */
+async function applyPayMethod(plan: BillingPlan, pay: Required<PayMethod>, type: "card" | "us_bank_account", pm: string): Promise<void> {
+  if (!plan.stripe_schedule_id || !plan.stripe_subscription_id) return;
+  await stripe().subscriptions.update(plan.stripe_subscription_id, {
+    default_payment_method: pm,
+    payment_settings: { payment_method_types: [type] },
+  });
+  // Decided by what the schedule holds, not by what the row said before:
+  // if this stops halfway and Stripe sends the event again, the second
+  // pass still finds a fee line a debit card shouldn't carry (or a
+  // missing one) and puts it right. The row is saved last for the same
+  // reason: it only says "debit card" once no phase charges the fee.
+  const schedule = await stripe().subscriptionSchedules.retrieve(plan.stripe_schedule_id, { expand: ["phases.items.price"] });
+  if (schedule.status === "active" || schedule.status === "not_started") {
+    const from = Math.max(0, schedule.phases.findIndex((p) => p.start_date === schedule.current_phase?.start_date));
+    const live = schedule.phases.slice(from);
+    const wanted = await Promise.all(live.map((phase) => itemsFor(planPriceOf(phase) as Stripe.Price, pay)));
+    const feeOn = (phase: Phase) => phase.items.find((i) => isFeePrice(i.price))?.price as Stripe.Price | undefined;
+    const right = live.every((phase, i) => {
+      const want = wanted[i].find((item) => "price_data" in item && item.price_data)?.price_data?.unit_amount ?? 0;
+      return (feeOn(phase)?.unit_amount ?? 0) === want;
+    });
+    if (!right) {
+      await stripe().subscriptionSchedules.update(schedule.id, {
+        phases: live.map((phase, i) => ({ items: wanted[i], start_date: phase.start_date, end_date: phase.end_date, metadata: { project_folder_id: plan._id } })),
+        proration_behavior: "none",
+      });
+    }
+  }
+  await savePlan(plan._id, pay);
+}
+
+/** A bank account or a card is linked: start the plan, or switch what a
+ * running plan is paid from. */
 async function onSetupSucceeded(si: Stripe.SetupIntent): Promise<PlanNotice[]> {
   const folderId = si.metadata?.project_folder_id;
   const payerId = si.metadata?.payer_human_id;
@@ -463,14 +557,17 @@ async function onSetupSucceeded(si: Stripe.SetupIntent): Promise<PlanNotice[]> {
   if (!folderId || !payerId || !pm || !customer) return [];
   const plan = await getPlan(folderId);
   if (!plan) return [];
+  const { pay, type } = await payMethodOf(pm);
 
   if (si.metadata?.purpose === "bank") {
     if (!plan.stripe_schedule_id || !plan.stripe_subscription_id) return [];
     await stripe().customers.update(customer, { invoice_settings: { default_payment_method: pm } });
     await stripe().subscriptionSchedules.update(plan.stripe_schedule_id, { default_settings: { default_payment_method: pm } });
-    await stripe().subscriptions.update(plan.stripe_subscription_id, { default_payment_method: pm });
-    // A plan whose debit failed: try the month it owes again on the new
-    // account. The same monthly debit the mandate covers, not a new one.
+    await applyPayMethod(plan, pay, type, pm);
+    // A plan whose payment failed: try the month it owes again on the new
+    // account or card. The same monthly payment the mandate covers, not a
+    // new one. The month already billed keeps the lines it was billed
+    // with; the fee follows the new method from the next month.
     if (plan.status === "past_due") {
       const { data: open } = await stripe().invoices.list({ subscription: plan.stripe_subscription_id, status: "open", limit: 5 });
       for (const inv of open) {
@@ -480,6 +577,7 @@ async function onSetupSucceeded(si: Stripe.SetupIntent): Promise<PlanNotice[]> {
           .catch((err) => console.warn(`billing: retrying ${inv.id} on the new account failed`, err));
       }
     }
+    await syncPlanFromStripe(folderId);
     return [];
   }
 
@@ -501,16 +599,17 @@ async function onSetupSucceeded(si: Stripe.SetupIntent): Promise<PlanNotice[]> {
       billing_mode: { type: "flexible" },
       end_behavior: "release",
       default_settings: { default_payment_method: pm, collection_method: "charge_automatically" },
-      phases: [{ items: [{ price: price.id }], metadata, ...OPEN_ENDED }],
+      phases: [{ items: await itemsFor(price, pay), metadata, ...OPEN_ENDED }],
       metadata,
     },
     { idempotencyKey: `plan-start-${folderId}-${si.id}` },
   );
   const subId = typeof schedule.subscription === "string" ? schedule.subscription : schedule.subscription?.id ?? null;
-  // Recurring is bank transfer only (seed), on the subscription itself.
+  // The plan is paid from what was linked, and only that, on the
+  // subscription itself.
   if (subId) {
     await stripe().subscriptions.update(subId, {
-      payment_settings: { payment_method_types: [...RECURRING_METHODS] },
+      payment_settings: { payment_method_types: [type] },
       metadata,
     });
   }
@@ -520,6 +619,7 @@ async function onSetupSucceeded(si: Stripe.SetupIntent): Promise<PlanNotice[]> {
   await savePlan(folderId, {
     status: "active",
     hold_since: plan.hold_since ?? (late ? now.toISOString() : null),
+    ...pay,
     payer_human_id: payerId,
     stripe_customer_id: customer,
     stripe_schedule_id: schedule.id,
@@ -549,8 +649,11 @@ export async function syncPlanFromStripe(folderId: string): Promise<BillingPlan 
     schedule.phases.findIndex((p) => p.start_date === schedule.current_phase?.start_date),
   );
   const nextPhase = schedule.phases[currentIdx + 1];
-  const currentLevel = levelOfPrice(sub?.items.data[0]?.price ?? (schedule.phases[currentIdx]?.items[0]?.price as Stripe.Price));
-  const pendingLevel = nextPhase ? levelOfPrice(nextPhase.items[0]?.price as Stripe.Price) : null;
+  // The plan's own line, wherever the card fee line sits beside it.
+  const levelIn = (items: { price: PriceRef }[] | undefined) =>
+    (items ?? []).map((i) => levelOfPrice(i.price as Stripe.Price)).find((l) => l) ?? null;
+  const currentLevel = levelIn(sub?.items.data) ?? levelIn(schedule.phases[currentIdx]?.items);
+  const pendingLevel = nextPhase ? levelIn(nextPhase.items) : null;
   const periodEnd = sub?.items.data[0]?.current_period_end ?? schedule.phases[currentIdx]?.start_date ?? null;
   const pauseEntry = schedule.pause_schedules?.[0]?.pause ?? null;
   const pauseAt = pauseEntry?.pause_at ?? null;
@@ -568,13 +671,16 @@ export async function syncPlanFromStripe(folderId: string): Promise<BillingPlan 
 
   const nextLevel = pendingLevel && nextPhase && periodEnd && nextPhase.start_date <= periodEnd ? pendingLevel : currentLevel;
   const nextPrice = nextLevel ? await priceFor(nextLevel) : null;
+  const billsNext = status === "active" || status === "past_due";
+  const nextFee = nextPrice ? cardFeeCents(nextPrice.unit_amount ?? 0, plan.pay_method, plan.card_funding) : 0;
 
   return savePlan(folderId, {
     status,
     level: currentLevel ?? plan.level,
     stripe_subscription_id: subId,
     current_period_end: periodEnd ? iso(periodEnd) : null,
-    next_amount_cents: status === "active" || status === "past_due" ? (nextPrice?.unit_amount ?? null) : null,
+    next_amount_cents: billsNext && nextPrice?.unit_amount != null ? nextPrice.unit_amount + nextFee : null,
+    card_fee_cents: billsNext ? nextFee : null,
     pending_level: pendingLevel && pendingLevel !== currentLevel ? pendingLevel : null,
     pending_at: pendingLevel && pendingLevel !== currentLevel && nextPhase ? iso(nextPhase.start_date) : null,
     pause_at: pauseWaiting && pauseAt ? iso(pauseAt) : null,
@@ -645,6 +751,18 @@ export async function applyPlanEvent(event: Stripe.Event): Promise<PlanNotice[]>
 
 export { isOnHold } from "./planHold.server";
 
+/** Take a say-it-once marker: set `field` to `at` only if nothing has,
+ * in one statement, and say whether this caller was the one who did.
+ * Production runs two machines and each runs the daily check, so "read
+ * that it's unset, then write it" would let both send the same email. */
+async function claim(table: string, id: string, field: "hold_since" | "pause_warned_at" | "pause_alerted_at" | "hold_notified_at", at: string): Promise<boolean> {
+  const result = await query<[unknown[]]>(`UPDATE $rec SET ${field} = $at WHERE ${field} = NONE OR ${field} = NULL RETURN VALUE id`, {
+    rec: new RecordId(table, id),
+    at,
+  });
+  return (result?.[0] ?? []).length > 0;
+}
+
 /** The daily check. Money 10 days past due puts work on hold and says
  * so, once: a plan with no bank linked, a plan whose debit failed, a bill
  * unpaid past its due date. At five months paused, the Client hears from
@@ -659,21 +777,18 @@ export async function pauseCheck(now = new Date()): Promise<PlanNotice[]> {
   for (const plan of (result?.[0] ?? []).map((r) => formatRecord(r))) {
     if (plan.status === "awaiting_setup" || plan.status === "past_due") {
       const since = plan.status === "awaiting_setup" ? plan.start_date : (plan.past_due_since ?? null);
-      if (!plan.hold_since && since && isOnHold(plan, now)) {
-        await merge(PLANS, plan._id, { hold_since: now.toISOString() });
+      if (!plan.hold_since && since && isOnHold(plan, now) && (await claim(PLANS, plan._id, "hold_since", now.toISOString()))) {
         notices.push({ type: "work_on_hold", folderId: plan._id, reason: plan.status === "awaiting_setup" ? "no_bank" : "debit_failed", since });
       }
       continue;
     }
     if (!plan.paused_at) continue;
     const milestone = pauseMilestone(new Date(plan.paused_at), now);
-    if (milestone !== "none" && !plan.pause_warned_at) {
+    if (milestone !== "none" && !plan.pause_warned_at && (await claim(PLANS, plan._id, "pause_warned_at", now.toISOString()))) {
       notices.push({ type: "pause_warn", folderId: plan._id, since: plan.paused_at });
-      await merge(PLANS, plan._id, { pause_warned_at: now.toISOString() });
     }
-    if (milestone === "alert" && !plan.pause_alerted_at && plan.status === "paused") {
+    if (milestone === "alert" && !plan.pause_alerted_at && plan.status === "paused" && (await claim(PLANS, plan._id, "pause_alerted_at", now.toISOString()))) {
       notices.push({ type: "pause_alert", folderId: plan._id, since: plan.paused_at });
-      await merge(PLANS, plan._id, { pause_alerted_at: now.toISOString() });
     }
   }
   // Bills past due: said once per bill.
@@ -683,7 +798,7 @@ export async function pauseCheck(now = new Date()): Promise<PlanNotice[]> {
   );
   for (const bill of (bills?.[0] ?? []).map((r) => formatRecord(r as never) as typeof r & { _id: string })) {
     if (bill.hold_notified_at || !billOnHold(bill, now)) continue;
-    await merge("billing_charges", bill._id, { hold_notified_at: now.toISOString() });
+    if (!(await claim("billing_charges", bill._id, "hold_notified_at", now.toISOString()))) continue;
     notices.push({ type: "work_on_hold", folderId: bill.project_folder_id, reason: "bill_overdue", since: billDueAt(bill.created_at).toISOString() });
   }
   return notices;
@@ -691,11 +806,13 @@ export async function pauseCheck(now = new Date()): Promise<PlanNotice[]> {
 
 export type PlanInvoice = { id: string; amountCents: number; status: "paid" | "clearing"; at: string };
 
-/** A plan's debits since `since`, read from Stripe each time: O.No keeps
+/** A plan's payments since `since`, read from Stripe each time: O.No keeps
  * no copy of them (Stripe is the record of money). Paid ones, and ones
- * Stripe has tried and is waiting on (a bank transfer clearing). Nothing
- * at $0, which is what a paused month bills. */
-export async function listPlanInvoices(subscriptionId: string, since: Date): Promise<PlanInvoice[]> {
+ * Stripe has tried and is waiting on: for a bank transfer that is the
+ * money clearing; for a card it is a payment that failed, which the
+ * plan's `past_due` status already says, so it isn't listed. Nothing at
+ * $0, which is what a paused month bills. */
+export async function listPlanInvoices(subscriptionId: string, since: Date, method: PlanPayMethod | null = "bank"): Promise<PlanInvoice[]> {
   const { data: invoices } = await stripe().invoices.list({
     subscription: subscriptionId,
     created: { gte: unix(since) },
@@ -705,7 +822,7 @@ export async function listPlanInvoices(subscriptionId: string, since: Date): Pro
     if (inv.status === "paid" && inv.amount_paid > 0) {
       return [{ id: inv.id ?? "", amountCents: inv.amount_paid, status: "paid", at: iso(inv.status_transitions?.paid_at ?? inv.created) }];
     }
-    if (inv.status === "open" && inv.attempted && inv.amount_due > 0) {
+    if (method !== "card" && inv.status === "open" && inv.attempted && inv.amount_due > 0) {
       return [{ id: inv.id ?? "", amountCents: inv.amount_due, status: "clearing", at: iso(inv.created) }];
     }
     return [];

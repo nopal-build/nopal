@@ -58,7 +58,7 @@ function PlanCard({ plan, levels }: { plan: ProfilePlan; levels: { value: string
         <p className={`${textSize.sm} ${sprinkles({ m: 0 })}`}>{v.line}</p>
         {v.awaitingSetup && (
           <Link to={`/pay/plan/${plan.folderId}`} className={button({ variant: "primary" })} style={{ alignSelf: "flex-start" }}>
-            Link a bank account
+            Link a bank account or card
           </Link>
         )}
         {changing && others.length > 0 && (
@@ -119,7 +119,7 @@ function PlanCard({ plan, levels }: { plan: ProfilePlan; levels: { value: string
             )}
             {v.canUpdateBank && (
               <Link to={`/pay/plan/${plan.folderId}?bank=1`} className={`${link} ${textSize.sm}`}>
-                Use another bank account
+                Pay from another account or card
               </Link>
             )}
             {v.canCancel && (
