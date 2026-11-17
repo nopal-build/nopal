@@ -7,10 +7,17 @@
 //      intent closes.
 //   2. A Guide plan: the guide's pick waits; a Client links a bank account;
 //      one schedule starts, bank transfer only; the first $3,000 debit pays.
-//   3. A plan change inside the 7-day notice waits a period longer.
+//   3. A Client asks for a different level and the guide decides: approved
+//      inside the 7-day notice, the change waits a period longer; declined,
+//      the plan stays and the Client hears.
 //   4. Pause at renewal charges nothing; resume moves the billing anchor.
 //   5. A bank account that fails: the guide hears once Stripe stops retrying.
 //   6. Cancel ends the plan at the period's end.
+//   7. A plan nobody linked a bank for: on hold 10 days after its billing day.
+//   8. A bill unpaid 40 days after it was sent: on hold until it's paid.
+//   9. A plan paid by credit card carries the card fee as its own line,
+//      through a level change; switched to a debit card, the fee is gone
+//      from the next month on.
 // A Client's confirmations (paying, linking the bank) are made here with
 // Stripe's test card and test bank account, standing in for the form.
 //
@@ -30,14 +37,17 @@ import { projectHold } from "robustness-core/data/planHold.server";
 import { createVaultFolder, deleteVaultFolderCascade, ensureVaultRootFolders } from "robustness-core/data/vault.server";
 import { createCharge, getCharge, paymentIntentSecretFor } from "robustness-core/data/billing.server";
 import {
+  approveLevelRequest,
   approveResume,
   cancelPlan,
   changePlan,
+  declineLevelRequest,
   getPlan,
   isOnHold,
   listPlanInvoices,
   pauseCheck,
   pausePlan,
+  requestLevel,
   requestResume,
   setPlanLevel,
   setupIntentSecretFor,
@@ -99,11 +109,17 @@ async function linkBank(clientSecret: string, bank: typeof BANK_OK) {
   return si;
 }
 
+/** What a Client's "Link" press does in the form, with a Stripe test card. */
+async function linkCard(clientSecret: string, card: "pm_card_visa" | "pm_card_visa_debit") {
+  const id = clientSecret.split("_secret_")[0];
+  return s.setupIntents.confirm(id, { payment_method: card, return_url: `${APP}/pay/plan/walk` });
+}
+
 async function main() {
   if (!process.env.STRIPE_SECRET_KEY?.startsWith("sk_test_")) throw new Error("Test keys only");
   const stamp = Date.now().toString(36);
   const guide = (await getHumanById("admin_1")) as Human;
-  const made: { humans: string[]; folder: string | null; clock: string | null; clock2: string | null } = { humans: [], folder: null, clock: null, clock2: null };
+  const made: { humans: string[]; folder: string | null; clock: string | null; clock2: string | null; clock3: string | null } = { humans: [], folder: null, clock: null, clock2: null, clock3: null };
 
   try {
     // ── Seed ──────────────────────────────────────────────────────────
@@ -145,7 +161,8 @@ async function main() {
     check("bill paid through the webhook", paid?.status === "paid", paid?.status);
     check("records Tom as the payer", paid?.paid_by_human_id === tom._id);
     check("records the terms version accepted", !!paid?.terms_version && !!paid?.accepted_at, paid?.terms_version);
-    const sueIntent = await s.paymentIntents.retrieve(opened.payment_intents[sue._id]);
+    // The bill reads paid a moment before the other intents are closed.
+    const sueIntent = await until("Sue's intent closed", () => s.paymentIntents.retrieve(opened.payment_intents[sue._id]), (pi) => pi.status === "canceled", 15);
     check("Sue's intent closed", sueIntent.status === "canceled", sueIntent.status);
     check("Tom gets a payment confirmation", (await until("mail", () => mailTo(tom.email, "Payment received"), (n) => n > 0, 15)) === 1);
     check("the guide hears it's paid", (await mailTo(guide.email, " paid $1,000")) >= 1);
@@ -164,7 +181,7 @@ async function main() {
     let plan = await until("plan active", () => getPlan(folder._id), (p) => p?.status === "active" && !!p.stripe_subscription_id);
     check("plan active through the webhook", plan?.status === "active", plan?.status);
     const sub = await s.subscriptions.retrieve(plan!.stripe_subscription_id!);
-    check("bank transfer only", JSON.stringify(sub.payment_settings?.payment_method_types) === '["us_bank_account"]', JSON.stringify(sub.payment_settings?.payment_method_types));
+    check("paid by bank transfer, and only that", JSON.stringify(sub.payment_settings?.payment_method_types) === '["us_bank_account"]', JSON.stringify(sub.payment_settings?.payment_method_types));
     check("one schedule, flexible mode", !!plan?.stripe_schedule_id && (await s.subscriptionSchedules.retrieve(plan!.stripe_schedule_id!)).billing_mode?.type === "flexible");
     const guideStart = Math.floor(firstBillingTime(guideDay).getTime() / 1000);
     check("billed from the guide's day, not the late link", Math.abs(sub.billing_cycle_anchor - guideStart) < DAY, `${Math.round((sub.billing_cycle_anchor - guideStart) / DAY)} days off`);
@@ -183,17 +200,28 @@ async function main() {
     }
 
     // ── 3. A change inside the notice ─────────────────────────────────
-    console.log("3. Deep Guide asked 3 days before the next debit");
+    console.log("3. Sue asks for Deep Guide 3 days before the next debit; the guide decides");
     plan = await until("synced", () => getPlan(folder._id), (p) => !!p?.current_period_end);
     const periodEnd = Math.floor(new Date(plan!.current_period_end!).getTime() / 1000);
     await advance(clock.id, periodEnd - 3 * DAY);
     const clockNow = new Date((await s.testHelpers.testClocks.retrieve(clock.id)).frozen_time * 1000);
-    await changePlan(plan!, "deep_guide", clockNow);
+    await sendPlanNotices(await requestLevel(plan!, "deep_guide", sue._id), APP);
+    plan = await getPlan(folder._id);
+    check("the ask is recorded and nothing moves", plan?.level_requested === "deep_guide" && plan?.level === "guide" && !plan?.pending_level, `${plan?.level_requested}, ${plan?.level}, ${plan?.pending_level}`);
+    check("the guide is asked to decide", (await until("mail", () => mailTo(guide.email, "asked to move to Deep Guide"), (n) => n > 0, 15)) >= 1);
+    await sendPlanNotices(await approveLevelRequest(folder._id, clockNow), APP);
     plan = await getPlan(folder._id);
     const waitDays = plan?.pending_at ? Math.round((new Date(plan.pending_at).getTime() / 1000 - periodEnd) / DAY) : null;
-    check("waits a period longer", plan?.pending_level === "deep_guide" && waitDays !== null && waitDays >= 28, `${waitDays} days after the next debit`);
+    check("approved, it waits a period longer", plan?.pending_level === "deep_guide" && waitDays !== null && waitDays >= 28, `${waitDays} days after the next debit`);
+    check("approving clears the ask", !plan?.level_requested, String(plan?.level_requested));
+    // The guide's own change back is direct; it needs nobody's ask.
     await changePlan(plan!, "guide", clockNow);
-    check("changing back clears it", (await getPlan(folder._id))?.pending_level === null);
+    check("the guide changing back clears it", (await getPlan(folder._id))?.pending_level === null);
+    await sendPlanNotices(await requestLevel((await getPlan(folder._id))!, "light_guide", sue._id), APP);
+    await sendPlanNotices(await declineLevelRequest(folder._id), APP);
+    plan = await getPlan(folder._id);
+    check("declined, the plan stays as it was", !plan?.level_requested && plan?.level === "guide" && !plan?.pending_level, `${plan?.level_requested}, ${plan?.level}, ${plan?.pending_level}`);
+    check("Sue hears it stays", (await until("mail", () => mailTo(sue.email, "stays on its plan"), (n) => n > 0, 15)) >= 1);
 
     // ── 4. Pause and resume ───────────────────────────────────────────
     console.log("4. Pause at renewal, then resume");
@@ -281,7 +309,7 @@ async function main() {
     check("still on hold while the payment clears", isOnHold(plan));
     await advance(clock2.id, clock2.frozen_time + 2 * 60 * 60);
     await advance(clock2.id, clock2.frozen_time + 6 * DAY);
-    const catchUp = await until("catch-up debit", async () => (await s.invoices.list({ subscription: plan!.stripe_subscription_id!, limit: 5 })).data.filter((i) => i.status === "paid"), (l) => l.length > 0, 30);
+    const catchUp = await until("catch-up debit", async () => (await s.invoices.list({ subscription: plan!.stripe_subscription_id!, limit: 5 })).data.filter((i) => i.status === "paid"), (l) => l.length > 0, 120);
     check("the catch-up debit covers every month since the billing day", catchUp[0]?.amount_paid === 600000, String(catchUp[0]?.amount_paid));
     plan = await until("hold lifted", () => getPlan(folder._id), (p) => !isOnHold(p), 30);
     check("the hold lifts once it clears", !isOnHold(plan));
@@ -311,10 +339,59 @@ async function main() {
     await sendPlanNotices(billNotices, APP);
     check("the Client's email carries the pay link", (await until("mail", () => mailTo(sue.email, "is on hold"), (n) => n > 1, 15)) >= 2);
     check("said once", (await pauseCheck()).filter((n) => n.folderId === folder._id).length === 0);
+
+    // ── 9. A plan paid by card ────────────────────────────────────────
+    console.log("9. Tom links a credit card, the plan changes level, then he switches to a debit card");
+    const clock3 = await s.testHelpers.testClocks.create({ frozen_time: Math.floor(Date.now() / 1000), name: `billing walk card ${stamp}` });
+    made.clock3 = clock3.id;
+    const cus3 = await s.customers.create({ email: tom.email, name: "Walk Tom", test_clock: clock3.id, metadata: { human_id: tom._id } });
+    await upsert(new RecordId("billing_customers", tom._id), { stripe_customer_id: cus3.id, created_at: new Date().toISOString() });
+    // The guide sets a plan again on the project whose last one ended: no
+    // row is touched by hand, so this is also a plan after a plan.
+    await sendPlanNotices(await setPlanLevel({ folderId: folder._id, level: "guide", startDay: dayIn(new Date()) }), APP);
+    check("a new plan waits to be linked", (await getPlan(folder._id))?.status === "awaiting_setup");
+    const cardSi = await linkCard(await setupIntentSecretFor((await getPlan(folder._id))!, tom, "setup"), "pm_card_visa");
+    check("credit card linked", cardSi.status === "succeeded", cardSi.status);
+    plan = await until("card plan active", () => getPlan(folder._id), (p) => p?.status === "active" && !!p.stripe_subscription_id && p.payer_human_id === tom._id);
+    check("the plan starts on the card", plan?.status === "active" && plan?.pay_method === "card" && plan?.card_funding === "credit", `${plan?.status}, ${plan?.pay_method}, ${plan?.card_funding}`);
+    check("the next payment is the plan and the card fee", plan?.next_amount_cents === 308730 && plan?.card_fee_cents === 8730, `${plan?.next_amount_cents}, ${plan?.card_fee_cents}`);
+    const cardSub = await s.subscriptions.retrieve(plan!.stripe_subscription_id!);
+    check("paid by card, and only that", JSON.stringify(cardSub.payment_settings?.payment_method_types) === '["card"]', JSON.stringify(cardSub.payment_settings?.payment_method_types));
+    await advance(clock3.id, clock3.frozen_time + 2 * 60 * 60);
+    const cardPaid = async () => (await s.invoices.list({ subscription: cardSub.id, limit: 20 })).data.filter((i) => i.status === "paid" && i.amount_paid > 0);
+    const firstCard = await until("first card payment", cardPaid, (l) => l.length >= 1, 30);
+    check("first payment is $3,087.30", firstCard[0]?.amount_paid === 308730, String(firstCard[0]?.amount_paid));
+    const lines = firstCard[0] ? (await s.invoices.retrieve(firstCard[0].id!)).lines.data.map((l) => l.amount).sort((a, b) => a - b) : [];
+    check("the fee is its own line on the receipt", JSON.stringify(lines) === "[8730,300000]", JSON.stringify(lines));
+    check("the ledger reads it from Stripe", (await listPlanInvoices(cardSub.id, new Date(0), "card")).some((i) => i.amountCents === 308730 && i.status === "paid"));
+    check("Tom's receipt names the fee", (await until("mail", () => mailTo(tom.email, "Payment received: $3,087.30"), (n) => n > 0, 20)) >= 1);
+
+    const cardNow = new Date((await s.testHelpers.testClocks.retrieve(clock3.id)).frozen_time * 1000);
+    await sendPlanNotices(await changePlan((await getPlan(folder._id))!, "deep_guide", cardNow), APP);
+    const amounts = async () =>
+      (await s.subscriptionSchedules.retrieve((await getPlan(folder._id))!.stripe_schedule_id!, { expand: ["phases.items.price"] })).phases.map((ph) =>
+        ph.items.map((i) => (i.price as { unit_amount: number }).unit_amount).sort((a, b) => a - b),
+      );
+    const changed = await amounts();
+    check("the change keeps this month's fee and puts Deep Guide's on the next", JSON.stringify(changed) === "[[8730,300000],[17430,600000]]", JSON.stringify(changed));
+
+    const debitSi = await linkCard(await setupIntentSecretFor((await getPlan(folder._id))!, tom, "bank"), "pm_card_visa_debit");
+    check("debit card linked", debitSi.status === "succeeded", debitSi.status);
+    plan = await until("switched to debit", () => getPlan(folder._id), (p) => p?.card_funding === "debit", 30);
+    check("the plan knows it's a debit card", plan?.pay_method === "card" && plan?.card_funding === "debit", `${plan?.pay_method}, ${plan?.card_funding}`);
+    const feeOff = await amounts();
+    check("the fee is off every month from here, on the same levels", JSON.stringify(feeOff) === "[[300000],[600000]]", JSON.stringify(feeOff));
+    const cardEnd = (await s.subscriptions.retrieve(cardSub.id)).items.data[0].current_period_end;
+    await advance(clock3.id, cardEnd + 2 * 60 * 60);
+    await advance(clock3.id, cardEnd + DAY);
+    const secondCard = await until("second card payment", cardPaid, (l) => l.length >= 2, 30);
+    const second = secondCard.find((i) => i.id !== firstCard[0]?.id);
+    check("the next month is Deep Guide with no fee", second?.amount_paid === 600000, String(second?.amount_paid));
   } finally {
     // ── Put everything back ───────────────────────────────────────────
     if (made.clock) await s.testHelpers.testClocks.del(made.clock).catch(() => {});
     if (made.clock2) await s.testHelpers.testClocks.del(made.clock2).catch(() => {});
+    if (made.clock3) await s.testHelpers.testClocks.del(made.clock3).catch(() => {});
     if (made.folder) {
       await query(`DELETE billing_charges WHERE project_folder_id = $f; DELETE $plan;`, {
         f: made.folder,

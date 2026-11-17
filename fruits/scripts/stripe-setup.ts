@@ -11,7 +11,7 @@
 // From fruits/, with test keys first, then live:
 //   set -a; source ../.env; set +a
 //   npx vite-node scripts/stripe-setup.ts
-import { stripe } from "robustness-core/data/stripe.server";
+import { CARD_FEE_PRODUCT_ID, ensureCardFeeProduct, stripe, stripeMode } from "robustness-core/data/stripe.server";
 import {
   lookupKeyFor,
   MENU_PLAN_LABELS,
@@ -36,7 +36,7 @@ const ITEMS: Item[] = [
 
 async function main() {
   const s = stripe();
-  const mode = process.env.STRIPE_SECRET_KEY?.startsWith("sk_live_") ? "LIVE" : "test";
+  const mode = stripeMode() === "test" ? "test" : "LIVE";
   console.log(`Stripe ${mode} mode`);
 
   for (const item of ITEMS) {
@@ -56,6 +56,10 @@ async function main() {
     });
     console.log(`  ${lookupKey}: created ${price.id} (${formatUsd(item.cents)}${item.monthly ? "/month" : ""})`);
   }
+  // The product a credit card's fee line is priced under on a plan. Its
+  // amount is worked out per plan (`cardFeeCents`), so it has no Price.
+  await ensureCardFeeProduct();
+  console.log(`  ${CARD_FEE_PRODUCT_ID}: ready`);
 }
 
 main().catch((err) => {
