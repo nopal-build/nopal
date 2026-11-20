@@ -24,6 +24,8 @@ import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { AppLayout } from "../components/AppLayout";
 import { MakerErrorBoundary } from "../components/MakerErrorBoundary";
 import { GroupSelect, ProjectPeople } from "../components/ProjectPeople";
+import { ProjectPayments } from "../components/ProjectPayments";
+import { projectPaymentsViews } from "../data/projectPaymentsView.server";
 import { CardTabs } from "../components/stamps-candidates/CardTabs";
 import { Badge } from "stamps/Badge";
 import { CenterContent } from "stamps/CenterContent";
@@ -65,10 +67,15 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // One humans read for an admin: the candidates and the Humans tab share it.
   const allHumans = staff ? ((await getHumans())?.data ?? []) : null;
   const [peopleProjects, everyone] = await Promise.all([peopleOnMany(everyProject), candidatesFor(user, allHumans ?? undefined)]);
+  const payments = await projectPaymentsViews(
+    peopleProjects.filter((_, i) => !isWebsiteFolder(everyProject[i].folder)),
+    url.origin,
+  );
   const projects = peopleProjects.map((p, i) => ({
     ...p,
     website: isWebsiteFolder(everyProject[i].folder),
     you: roleIn(everyProject[i].sharing, user._id),
+    payments: payments.get(p.id) ?? null,
   }));
 
   // Everyone, once, with their group on each project: for the Humans tab
@@ -184,6 +191,12 @@ function ProjectDisclosure({ project, everyone, groups }: { project: ProjectRow;
           Open the project →
         </Link>
         <ProjectPeople project={people} everyone={everyone} groups={groups} action={ACTION} />
+        {/* Billing sits with the people (Austin, 2026-11-03). Not on a website. */}
+        {project.payments && (
+          <Surface className={sprinkles({ p: 4 })}>
+            <ProjectPayments projectId={project.id} {...project.payments} />
+          </Surface>
+        )}
       </Stack>
     </Disclosure>
   );

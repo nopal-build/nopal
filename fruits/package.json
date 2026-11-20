@@ -39,6 +39,8 @@
     "@react-router/node": "^7.14.0",
     "@simplewebauthn/browser": "^13.3.0",
     "@simplewebauthn/server": "^13.3.2",
+    "@stripe/react-stripe-js": "^7.0.1",
+    "@stripe/stripe-js": "^10.2.0",
     "@types/pdfkit": "^0.17.6",
     "cross-env": "^7.0.3",
     "express": "^4.19.2",

@@ -57,6 +57,10 @@ strategy = 'bluegreen'
 # (email-code) login is unaffected either way -- it isn't domain-bound.
 [env]
 WEBAUTHN_RP_ID = 'nopal.build'
+# The app's own address, for links in mail the server sends to itself to
+# send (the daily billing check calls localhost, so it can't read it off
+# the request).
+APP_BASE_URL = 'https://o.nopal.build'
 
 [http_service]
 internal_port = 3000

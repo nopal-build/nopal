@@ -68,6 +68,12 @@ importers:
       '@simplewebauthn/server':
         specifier: ^13.3.2
         version: 13.3.2
+      '@stripe/react-stripe-js':
+        specifier: ^7.0.1
+        version: 7.0.1(@stripe/stripe-js@10.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+      '@stripe/stripe-js':
+        specifier: ^10.2.0
+        version: 10.2.0
       '@types/pdfkit':
         specifier: ^0.17.6
         version: 0.17.6
@@ -335,6 +341,9 @@ importers:
       sharp:
         specifier: ^0.35.3
         version: 0.35.4(@types/node@26.2.0)
+      stripe:
+        specifier: ^23.1.0
+        version: 23.1.0(@types/node@26.2.0)
       surrealdb:
         specifier: ^1.3.2
         version: 1.3.2(tslib@2.8.1)(typescript@5.9.3)(ws@8.21.3)
@@ -1576,6 +1585,17 @@ packages:
 
   '@stablelib/base64@1.0.1':
     resolution: {integrity: sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ==}
+
+  '@stripe/react-stripe-js@7.0.1':
+    resolution: {integrity: sha512-yDVPIS/RcmYqtX0xuNjAlHd/d9B9twmWwzn4GrZcfrlg737yPC/rfnOs2vCwAs40zrZ2qz4VL1r5b1t0gFRjQQ==}
+    peerDependencies:
+      '@stripe/stripe-js': '>=10.0.0 <11.0.0'
+      react: '>=16.8.0 <20.0.0'
+      react-dom: '>=16.8.0 <20.0.0'
+
+  '@stripe/stripe-js@10.2.0':
+    resolution: {integrity: sha512-C0F6LKxvsa9ONtxfJ4JG/vo8XjramVyy7tOZNZvoaZkw0M82OTm9LD3Ifcvw0QMDI7qPA14h+IP3qagkuC3b2Q==}
+    engines: {node: '>=12.16'}
 
   '@swc/helpers@0.5.23':
     resolution: {integrity: sha512-5lSsMOTXURePglDfvuAQUqkGek9Hg2kksOYay2m0+XR++b2NWYL/4sWyuvVBIs8oKnJaxkdi9whaL/sqN13afw==}
@@ -3022,6 +3042,9 @@ packages:
     resolution: {integrity: sha512-7PiHtLll5LdnKIMw100I+8xJXR5gW2QwWYkT6iJva0bXitZKa/XMrSbdmg3r2Xnaidz9Qumd0VPaMrZlF9V9sA==}
     engines: {node: '>=0.4.0'}
 
+  prop-types@15.8.1:
+    resolution: {integrity: sha512-oj87CgZICdulUohogVAR7AjlC0327U4el4L6eAvOqCeudMDVU0NThNaV+b9Df4dXgSP1gXMTnPdhfe/2qDH5cg==}
+
   proxy-addr@2.0.7:
     resolution: {integrity: sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==}
     engines: {node: '>= 0.10'}
@@ -3058,6 +3081,9 @@ packages:
     engines: {node: '>=10', npm: '>=6'}
     peerDependencies:
       react: '>=16.13.1'
+
+  react-is@16.13.1:
+    resolution: {integrity: sha512-24e6ynE2H+OKt4kqsOvNd8kBpV65zoxbA4BVsEOB3ARVWQki/DHzaUoC5KuON/BiccDaCCTZBuOcfZs70kR8bQ==}
 
   react-refresh@0.14.2:
     resolution: {integrity: sha512-jCvmsr+1IUSMUyzOkRcvnVbX3ZYC6g9TDrDbFuFmRDq7PD4yaGbLKNQL6k2jnArV8hjYxh7hVhAZB6s9HDGpZA==}
@@ -3294,6 +3320,15 @@ packages:
   strip-ansi@7.2.0:
     resolution: {integrity: sha512-yDPMNjp4WyfYBkHnjIRLfca1i6KMyGCtsVgoKe/z1+6vukgaENdgGBZt+ZmKPc4gavvEZ5OgHfHdrazhgNyG7w==}
     engines: {node: '>=12'}
+
+  stripe@23.1.0:
+    resolution: {integrity: sha512-fVUfMSfTPoukfoV//MUKAx2+YxyKmYaYtnAL9VkfnHfaPNQylFdWZMD+zgUFerI8rjbaiER8Vzj2XEUQ2AhAsQ==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@types/node': ^26.2.0
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
 
   sucrase@3.35.1:
     resolution: {integrity: sha512-DhuTmvZWux4H1UOnWMB3sk0sbaCVOoQZjv8u1rDoTV0HTdGem9hkAZtl4JZy8P2z4Bg0nT+YMeOFyVr4zcG5Tw==}
@@ -4749,6 +4784,15 @@ snapshots:
       tslib: 2.8.1
 
   '@stablelib/base64@1.0.1': {}
+
+  '@stripe/react-stripe-js@7.0.1(@stripe/stripe-js@10.2.0)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)':
+    dependencies:
+      '@stripe/stripe-js': 10.2.0
+      prop-types: 15.8.1
+      react: 18.3.1
+      react-dom: 18.3.1(react@18.3.1)
+
+  '@stripe/stripe-js@10.2.0': {}
 
   '@swc/helpers@0.5.23':
     dependencies:
@@ -6430,6 +6474,12 @@ snapshots:
 
   progress@2.0.3: {}
 
+  prop-types@15.8.1:
+    dependencies:
+      loose-envify: 1.4.0
+      object-assign: 4.1.1
+      react-is: 16.13.1
+
   proxy-addr@2.0.7:
     dependencies:
       forwarded: 0.2.0
@@ -6467,6 +6517,8 @@ snapshots:
     dependencies:
       '@babel/runtime': 7.29.7
       react: 18.3.1
+
+  react-is@16.13.1: {}
 
   react-refresh@0.14.2: {}
 
@@ -6576,6 +6628,7 @@ snapshots:
       remix-auth: 4.2.0
       remix-auth-totp: 4.0.0(remix-auth@4.2.0)
       sharp: 0.35.4(@types/node@26.2.0)
+      stripe: 23.1.0(@types/node@26.2.0)
       surrealdb: 1.3.2(tslib@2.8.1)(typescript@5.9.3)(ws@8.21.3)
       yaml: 2.9.0
     transitivePeerDependencies:
@@ -6811,6 +6864,10 @@ snapshots:
   strip-ansi@7.2.0:
     dependencies:
       ansi-regex: 6.3.0
+
+  stripe@23.1.0(@types/node@26.2.0):
+    optionalDependencies:
+      '@types/node': 26.2.0
 
   sucrase@3.35.1:
     dependencies:

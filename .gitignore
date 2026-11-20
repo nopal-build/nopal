@@ -34,6 +34,9 @@ fruits/tmp/
 
 # Environment variables
 .env
+# Live Stripe keys for the one-time setup and the preflight; never the
+# sandbox file, never committed.
+.env.live
 
 # Mac Ignores
 .DS_Store

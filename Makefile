@@ -225,13 +225,13 @@ restart-fruits:
 ## Restart the GraphLog worker container -- the worker-only half of
 ## `restart` below; see `restart-webapp`'s own comment for why this is a
 ## scoped `make dev` rather than a plain `docker compose restart`.
-## `worker.ts` reads webapp/.env (ANTHROPIC_API_KEY, ANTHROPIC_WORKSPACE_ID,
-## DATABASE_*, ...) exactly ONCE, at its own process startup -- neither
-## editing that file nor `worker`'s `--watch` dev mode (which only follows
-## the JS import graph, never .env) ever reloads it. Any .env change needs
-## this, not just package changes, or the worker keeps running on a stale
-## value (a rotated API key, a newly-added workspace id, etc.) until it's
-## restarted by hand.
+## `worker.ts` reads the root `.env` (ANTHROPIC_API_KEY,
+## ANTHROPIC_WORKSPACE_ID, DATABASE_*, ...) exactly ONCE, at its own
+## process startup -- neither editing that file nor `worker`'s `--watch`
+## dev mode (which only follows the JS import graph, never .env) ever
+## reloads it. Any .env change needs this, not just package changes, or
+## the worker keeps running on a stale value (a rotated API key, a
+## newly-added workspace id, etc.) until it's restarted by hand.
 restart-worker:
 	docker compose up -d --wait --build worker
 

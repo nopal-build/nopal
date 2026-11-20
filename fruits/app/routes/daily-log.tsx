@@ -46,6 +46,8 @@ import { markOwnMutation } from "../hooks/useVaultEvents";
 // diagnose a "feels slow" report against.
 import { withRequestPerf } from "robustness-core/data/requestPerf.server";
 import { timeRequestPerf } from "robustness-core/data/requestPerfContext.server";
+import { CLIENT_ROLE } from "robustness-core/data/sharingRoles.server";
+import { projectOnHold } from "robustness-core/data/planHold.server";
 
 export const meta: MetaFunction = () => [{ title: "O.No · Daily Logs" }];
 
@@ -65,7 +67,10 @@ export async function loader({ request }: LoaderFunctionArgs) {
   // Projects for "Add a card": every project whose group gets `dailyLog`
   // (a Client does; an Observer doesn't write to the project).
   const memberships = await listProjectsFor(user._id);
-  const projectFolders = memberships.filter((m) => featuresOf(m.role).includes("dailyLog")).map((m) => m.folder);
+  const writable = memberships.filter((m) => featuresOf(m.role).includes("dailyLog"));
+  // A Client's project on hold for a missing bank link takes no Cards.
+  const held = await Promise.all(writable.map((m) => (m.role === CLIENT_ROLE ? projectOnHold(m.folder._id) : false)));
+  const projectFolders = writable.filter((_, i) => !held[i]).map((m) => m.folder);
 
   // Cards for each day that actually references one — a cheap substring
   // check up front so this stays proportional to real Card usage instead

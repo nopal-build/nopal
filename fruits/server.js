@@ -168,6 +168,30 @@ httpServer.listen(3000, () => {
       setInterval(runTrashCleanup, 24 * 60 * 60 * 1000);
     }, 37_000);
 
+    // ── Paused-plan check ───────────────────────────────────────────────
+    // Emails a paused plan's clients at five months and its guide at six
+    // (payments seed; api.billing.pause-check.tsx). Same CRON_SECRET,
+    // staggered from the cleanups above.
+    const runPauseCheck = async () => {
+      try {
+        const res = await fetch(
+          "http://localhost:3000/api/billing/pause-check",
+          {
+            method: "POST",
+            headers: { Authorization: `Bearer ${cronSecret}` },
+          },
+        );
+        const data = await res.json();
+        console.log("[cron] pause-check:", data);
+      } catch (err) {
+        console.error("[cron] pause-check failed:", err);
+      }
+    };
+    setTimeout(() => {
+      runPauseCheck();
+      setInterval(runPauseCheck, 24 * 60 * 60 * 1000);
+    }, 43_000);
+
     // ── Performance-trace pruning ──────────────────────────────
     // Deletes traced server-request rows (and their fn/db events) past
     // their retention window -- see api.performance.prune.tsx's own
