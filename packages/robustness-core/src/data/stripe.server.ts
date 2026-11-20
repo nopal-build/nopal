@@ -54,15 +54,20 @@ export const RECURRING_METHODS = ["us_bank_account", "card"] as const;
  * so the fee line can be told from the plan's own line on a schedule and
  * on an invoice, and made on first use (`stripe-setup.ts` makes it too). */
 export const CARD_FEE_PRODUCT_ID = "nopal_card_fee";
+/** What Stripe's own invoice and receipt call the line (Austin,
+ * 2026-11-20: named as what it is, the fee is clear without more). */
+export const CARD_FEE_PRODUCT_NAME = "Credit card processing fee";
 let feeProductEnsured = false;
 export async function ensureCardFeeProduct(): Promise<string> {
   if (feeProductEnsured) return CARD_FEE_PRODUCT_ID;
   try {
-    await stripe().products.retrieve(CARD_FEE_PRODUCT_ID);
+    const product = await stripe().products.retrieve(CARD_FEE_PRODUCT_ID);
+    // One made under an earlier name takes the current one.
+    if (product.name !== CARD_FEE_PRODUCT_NAME) await stripe().products.update(CARD_FEE_PRODUCT_ID, { name: CARD_FEE_PRODUCT_NAME });
   } catch (err) {
     if ((err as { code?: string }).code !== "resource_missing") throw err;
     await stripe()
-      .products.create({ id: CARD_FEE_PRODUCT_ID, name: "Credit card fee", metadata: { nopal_item: "card_fee" } })
+      .products.create({ id: CARD_FEE_PRODUCT_ID, name: CARD_FEE_PRODUCT_NAME, metadata: { nopal_item: "card_fee" } })
       .catch((e) => {
         // Two requests at once: the other one made it.
         if ((e as { code?: string }).code !== "resource_already_exists") throw e;

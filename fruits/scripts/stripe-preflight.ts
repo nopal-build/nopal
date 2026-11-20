@@ -19,7 +19,7 @@
 //   set -a; source ../.env; set +a
 //   npx vite-node scripts/stripe-preflight.ts
 //   npx vite-node scripts/stripe-preflight.ts --endpoint https://o.nopal.build/api/stripe/webhook
-import { CARD_FEE_PRODUCT_ID, STRIPE_API_VERSION, stripe, stripeKeysProblem, stripeMode } from "robustness-core/data/stripe.server";
+import { CARD_FEE_PRODUCT_ID, CARD_FEE_PRODUCT_NAME, STRIPE_API_VERSION, stripe, stripeKeysProblem, stripeMode } from "robustness-core/data/stripe.server";
 import {
   CARD_FEE_CAP_PERCENT,
   HANDLED_STRIPE_EVENTS,
@@ -94,6 +94,8 @@ async function main() {
   console.log("Card fee");
   const feeProduct = await s.products.retrieve(CARD_FEE_PRODUCT_ID).catch(() => null);
   check(`the ${CARD_FEE_PRODUCT_ID} product exists and is active`, !!feeProduct && feeProduct.active, feeProduct ? "" : "run scripts/stripe-setup.ts");
+  // The name is the line on Stripe's own invoices and receipts.
+  if (feeProduct) check(`it is named "${CARD_FEE_PRODUCT_NAME}"`, feeProduct.name === CARD_FEE_PRODUCT_NAME, feeProduct.name === CARD_FEE_PRODUCT_NAME ? "" : `"${feeProduct.name}"; run scripts/stripe-setup.ts`);
   for (const level of MENU_PLANS) {
     const cents = MENU.find((m) => m.key === level)!.cents;
     const fee = cardFeeCents(cents, "card", "credit");

@@ -113,7 +113,7 @@ async function mailFor(notice: PlanNotice, project: string, origin: string): Pro
       const price = await priceFor(notice.level);
       const plan = await getPlan(notice.folderId);
       const fee = cardFeeCents(price.unit_amount ?? 0, plan?.pay_method, plan?.card_funding);
-      const amount = monthlyAmount((price.unit_amount ?? 0) + fee) + (fee ? `, which includes the ${formatUsd(fee)} credit card fee` : "");
+      const amount = monthlyAmount((price.unit_amount ?? 0) + fee) + (fee ? `, which includes the ${formatUsd(fee)} credit card processing fee` : "");
       const line = `The ${MENU_PLAN_LABELS[notice.level]} plan for ${project} has started: ${amount}, renewing on ${renewalDay(notice.firstDebit)} of each month.`;
       return [
         { to: "clients", subject: `${project}'s plan has started`, lines: [line, "You can change, pause or cancel it on your profile."], button: profile },
@@ -287,7 +287,7 @@ async function mailFor(notice: PlanNotice, project: string, origin: string): Pro
           subject: `Payment received: ${formatUsd(notice.amountCents)} for ${project}`,
           lines: [
             `Your ${formatUsd(notice.amountCents)} payment for ${project}'s ${name} cleared. Thanks.`,
-            ...(plan.card_fee_cents ? [`That includes the ${formatUsd(plan.card_fee_cents)} credit card fee.`] : []),
+            ...(plan.card_fee_cents ? [`That includes the ${formatUsd(plan.card_fee_cents)} credit card processing fee.`] : []),
           ],
           button: profile,
         },
@@ -369,7 +369,7 @@ export function describePlan(plan: BillingPlan | null, audience: "guide" | "clie
   const status = plan?.status ?? "none";
   const name = plan?.level ? MENU_PLAN_LABELS[plan.level] : null;
   const amount = plan?.next_amount_cents != null ? formatUsd(plan.next_amount_cents) : null;
-  const fee = plan?.card_fee_cents ? `, including the ${formatUsd(plan.card_fee_cents)} credit card fee` : "";
+  const fee = plan?.card_fee_cents ? `, including the ${formatUsd(plan.card_fee_cents)} credit card processing fee` : "";
   const on = (d: string | null) => (d ? billingDate(d) : "the next billing date");
   const renew = plan?.start_date ? `${renewalDay(plan.start_date)} of each month` : "the same day each month";
   let line: string;

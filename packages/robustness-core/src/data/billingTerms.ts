@@ -42,17 +42,18 @@ const BILL_TERMS = [
   "Termination: Either party may terminate with 30 days' written notice. Client owes Guide for all services performed and approved expenses through the termination date, payable within 30 days.",
 ];
 
-/** Approved by Austin 2026-11-17 (no `draft-`): live payments may be
+/** Approved by Austin 2026-11-17, and again 2026-11-20 with the fee
+ * named the credit card processing fee (no `draft-`): live payments may be
  * raised under it. Any edit to a text below needs his read and a new
  * version. */
-const VERSION = "2026-11-17";
+const VERSION = "2026-11-20";
 
 export const PAYMENT_TERMS: Record<PaymentCategory, PaymentTerms> = {
   subscription: {
     version: VERSION,
     title: "Guide plan",
     text: [
-      `Payment: Your plan is billed monthly, from the account or card you link, on your monthly renewal date, until you or your guide ends it. Each payment covers the next month of service. A plan paid by credit card adds a card fee of ${cardFeeRate()} to each payment, shown before you link the card and as its own line on each receipt. Bank transfers and debit cards pay no fee.`,
+      `Payment: Your plan is billed monthly, from the account or card you link, on your monthly renewal date, until you or your guide ends it. Each payment covers the next month of service. A plan paid by credit card adds a credit card processing fee of ${cardFeeRate()} to each payment, shown before you link the card and as its own line on each receipt. Bank transfers and debit cards pay no fee.`,
       "Changes and pauses: You can pause the plan from your profile, and ask there for a different plan; your guide confirms a change with you. Your guide can also change or pause the plan. A pause starts at your next renewal date. A change starts at the next renewal date after your guide confirms it, or the one after if that date is less than 7 days away. A paused month isn't billed. Nothing is refunded or prorated for a month that has started. To come back, ask to resume from your profile; your guide confirms, and billing restarts that day on a new monthly date.",
       "Late payment: Guide may suspend services when a payment is over 10 days past due, including when no bank account or card is linked by the plan's start. An account or card linked late is billed for every month since the plan started.",
       "Termination: Either party may terminate with 30 days' written notice; cancelling from your profile is written notice. The plan ends on the first renewal date at least 30 days after notice, so one more month may be billed. A paused plan ends right away.",

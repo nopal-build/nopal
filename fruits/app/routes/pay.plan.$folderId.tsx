@@ -80,7 +80,7 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
       ? {
           name: MENU_PLAN_LABELS[level],
           amount: monthlyAmount(price?.unit_amount ?? 0),
-          byCard: `Paying by credit card adds a ${cardFeeRate()} fee (${formatUsd(withCardFee(price?.unit_amount ?? 0) - (price?.unit_amount ?? 0))} a month). Bank transfer (ACH) has no fee.`,
+          byCard: `Paying by credit card adds a ${cardFeeRate()} processing fee (${formatUsd(withCardFee(price?.unit_amount ?? 0) - (price?.unit_amount ?? 0))} a month). Bank transfer (ACH) has no fee.`,
           starts: renewalLines(plan?.start_date ?? null).join(" "),
         }
       : null,
