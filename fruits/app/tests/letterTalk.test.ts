@@ -14,7 +14,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LlmProvider, LlmResponse } from "robustness-core/data/llmProvider";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -206,6 +206,18 @@ beforeEach(() => {
   usage.length = 0;
   cardDoor = "open";
   off = [];
+});
+
+// The days below are the days this was written. The code keeps a day it is
+// handed only when it is within a day of the server's own (`markDate`),
+// so on any later date it stamped today instead and these went red with
+// the calendar (2026-11-09). The clock stands at noon on 2026-11-07, a
+// day from every date used here. Only `Date` is faked; timers run.
+beforeAll(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-11-07T12:00:00Z") });
+});
+afterAll(() => {
+  vi.useRealTimers();
 });
 
 describe("giving the talk, with or without a brief", () => {
