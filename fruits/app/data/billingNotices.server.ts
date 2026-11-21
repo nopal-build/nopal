@@ -293,6 +293,20 @@ async function mailFor(notice: PlanNotice, project: string, origin: string): Pro
         },
       ];
     }
+    case "refunded": {
+      // Refunds are made in Stripe by hand; this is how the other guides
+      // hear, and why the Payments page shows it.
+      const of = notice.refundedCents >= notice.paidCents ? "" : ` of the ${formatUsd(notice.paidCents)} paid`;
+      const what = notice.what ? `for ${notice.what}` : "on its plan";
+      return [
+        {
+          to: "guides",
+          subject: `${formatUsd(notice.refundedCents)} refunded on ${project}`,
+          lines: [`${formatUsd(notice.refundedCents)}${of} ${what} was refunded in Stripe. ${project}'s Payments now show it as refunded.`],
+          button: maker,
+        },
+      ];
+    }
     case "hold_lifted": {
       const line = `${project}'s payment cleared, and work is back on.`;
       return [

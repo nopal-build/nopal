@@ -8,7 +8,7 @@
  */
 import type { BillingCharge } from "robustness-core/data/billing.server";
 import { isOnHold, listPlanInvoices, type BillingPlan, type PlanInvoice } from "robustness-core/data/billingPlans.server";
-import { MENU_PLANS, MENU_PLAN_LABELS, addMonthsClamped, cardFeeCents, discountNote, type MenuPlan } from "robustness-core/data/billingRules";
+import { MENU_PLANS, MENU_PLAN_LABELS, addMonthsClamped, cardFeeCents, discountNote, formatUsd, type MenuPlan } from "robustness-core/data/billingRules";
 import { priceFor } from "robustness-core/data/stripe.server";
 import { getHumansById } from "robustness-core/data/humans.server";
 import { displayName } from "robustness-core/data/humanNames";
@@ -17,7 +17,7 @@ export const UPCOMING_DAYS = 60;
 export const RECENT_DAYS = 90;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export type LedgerState = "hold" | "failed" | "resume" | "level" | "waiting" | "due" | "awaiting_bank" | "paid" | "clearing";
+export type LedgerState = "hold" | "failed" | "resume" | "level" | "waiting" | "due" | "awaiting_bank" | "paid" | "clearing" | "refunded";
 
 export type LedgerRow = {
   key: string;
@@ -59,7 +59,10 @@ export function buildLedger(input: {
     else if (c.status === "open") upcoming.push({ ...base, key: c._id, at: c.created_at, who: null, state: "waiting" });
     else if (c.status === "processing") recent.push({ ...base, key: c._id, at: c.updated_at, who: who(c.paid_by_human_id), state: "clearing" });
     else if (c.status === "paid" && new Date(c.paid_at ?? c.updated_at).getTime() >= since) {
-      recent.push({ ...base, key: c._id, at: c.paid_at ?? c.updated_at, who: who(c.paid_by_human_id), state: "paid" });
+      // Refunded in Stripe: the row shows what went back, not what was paid.
+      const back = c.refunded_cents ?? 0;
+      if (back > 0) recent.push({ ...base, key: c._id, at: c.refunded_at ?? c.updated_at, who: who(c.paid_by_human_id), state: "refunded", amountCents: back, note: back >= c.amount_cents ? null : `of ${formatUsd(c.amount_cents)}` });
+      else recent.push({ ...base, key: c._id, at: c.paid_at ?? c.updated_at, who: who(c.paid_by_human_id), state: "paid" });
     }
   }
 
@@ -103,7 +106,9 @@ export function buildLedger(input: {
     }
     for (const inv of input.invoices.get(p._id) ?? []) {
       if (p.status === "past_due" && inv.status === "clearing") continue; // counted under Needs you
-      recent.push({ ...base, key: inv.id, at: inv.at, what: planName(p.level), who: who(p.payer_human_id), amountCents: inv.amountCents, state: inv.status });
+      const back = p.refunds?.[inv.id]?.cents ?? 0;
+      if (back > 0) recent.push({ ...base, key: inv.id, at: inv.at, what: planName(p.level), who: who(p.payer_human_id), amountCents: back, state: "refunded", note: back >= inv.amountCents ? null : `of ${formatUsd(inv.amountCents)}` });
+      else recent.push({ ...base, key: inv.id, at: inv.at, what: planName(p.level), who: who(p.payer_human_id), amountCents: inv.amountCents, state: inv.status });
     }
   }
 

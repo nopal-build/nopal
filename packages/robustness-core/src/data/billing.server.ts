@@ -28,7 +28,21 @@ import { defineTable, formatRecord, merge, newRecordId, query, select, upsert, t
 import { categoryFor, discounted, hasTypedAmount, type OneTimeKind } from "./billingRules";
 import { assertTermsUsable, termsFor } from "./billingTerms";
 import { ONE_TIME_METHODS, priceFor, stripe } from "./stripe.server";
-import { applyPlanEvent, type PlanNotice } from "./billingPlans.server";
+import { applyPlanEvent, planPaymentRefunded, type PlanNotice } from "./billingPlans.server";
+
+/** Take a say-it-once marker: set `field` to `at` only if nothing has,
+ * in one statement, and say whether this caller was the one who did.
+ * Two things can reach the same news at once (production's two machines
+ * on the daily check; the pay page and the webhook on a payment), and
+ * "read that it's unset, then write it" would let both send the email. */
+export async function claimOnce(table: string, id: string, field: string, at: string): Promise<boolean> {
+  if (!/^[a-z_]+$/.test(field)) throw new Error(`Not a field name: ${field}`);
+  const result = await query<[unknown[]]>(`UPDATE $rec SET ${field} = $at WHERE ${field} = NONE OR ${field} = NULL RETURN VALUE id`, {
+    rec: new RecordId(table, id),
+    at,
+  });
+  return (result?.[0] ?? []).length > 0;
+}
 
 const CUSTOMERS = "billing_customers";
 const CHARGES = "billing_charges";
@@ -105,6 +119,13 @@ export type BillingCharge = Data & {
   attachments?: ChargeAttachment[];
   /** When the daily check put the project's work on hold for this bill. */
   hold_notified_at?: string | null;
+  /** When "it's paid" was said, to the payer and the guides: once, by
+   * whichever of the pay page and the webhook saw the payment first. */
+  paid_notice_at?: string | null;
+  /** What has been refunded, in Stripe's dashboard by hand (O.No only
+   * hears of it). The bill stays `paid`; the views say refunded. */
+  refunded_cents?: number | null;
+  refunded_at?: string | null;
   created_at: string;
   paid_at: string | null;
   updated_at: string;
@@ -268,7 +289,14 @@ export function chargeStatusFor(pi: Pick<Stripe.PaymentIntent, "status" | "last_
 }
 
 /** Returns a notice the first time a bill is paid or starts paying, so the
- * payer gets a confirmation and the guide hears (Austin, 2026-11-03). */
+ * payer gets a confirmation and the guide hears (Austin, 2026-11-03).
+ *
+ * Two callers get here for one payment: the pay page, when Stripe sends
+ * the Client back to it, and the webhook a moment later. Whoever is
+ * first takes the notice (`paid_notice_at`), and both send what they are
+ * handed. Before 2026-11-20 the page threw its notice away and the
+ * webhook, finding the bill already paid, had none: a Client who paid in
+ * a browser got no confirmation and the guide never heard. */
 async function syncChargeFromPaymentIntent(pi: Stripe.PaymentIntent): Promise<PlanNotice[]> {
   const chargeId = pi.metadata?.charge_id;
   if (!chargeId) return [];
@@ -285,7 +313,6 @@ async function syncChargeFromPaymentIntent(pi: Stripe.PaymentIntent): Promise<Pl
       console.error(`billing: charge ${charge._id} paid twice (${charge.stripe_payment_intent_id} and ${pi.id})`);
       return [];
     }
-    const firstNews = charge.status !== "paid" && charge.status !== "processing";
     await merge(CHARGES, charge._id, {
       status,
       stripe_payment_intent_id: pi.id,
@@ -308,6 +335,7 @@ async function syncChargeFromPaymentIntent(pi: Stripe.PaymentIntent): Promise<Pl
       }
     }
     const payer = pi.metadata?.payer_human_id ?? null;
+    const firstNews = await claimOnce(CHARGES, charge._id, "paid_notice_at", now);
     return firstNews && payer
       ? [{ type: "charge_paid", folderId: charge.project_folder_id, chargeId: charge._id, payerId: payer, clearing: status === "processing", wasHeld: !!charge.hold_notified_at }]
       : [];
@@ -315,7 +343,8 @@ async function syncChargeFromPaymentIntent(pi: Stripe.PaymentIntent): Promise<Pl
 
   if (status === "failed" && (isActive || isPayable(charge))) {
     // A card decline, or a bank transfer that came back: payable again.
-    await merge(CHARGES, charge._id, { status: "failed", paid_at: null, updated_at: now });
+    // The next payment on it is news again.
+    await merge(CHARGES, charge._id, { status: "failed", paid_at: null, paid_notice_at: null, updated_at: now });
   }
   // `canceled` is written by `cancelCharge` itself; an intent closed
   // because someone else paid changes nothing.
@@ -324,11 +353,31 @@ async function syncChargeFromPaymentIntent(pi: Stripe.PaymentIntent): Promise<Pl
 
 /** Re-read one of a bill's PaymentIntents and save what it says, for the
  * pay page after Stripe sends the client back (the webhook may not be in
- * yet). Only an intent that belongs to this bill is read. */
-export async function refreshCharge(charge: BillingCharge, paymentIntentId: string): Promise<BillingCharge> {
-  if (!Object.values(charge.payment_intents ?? {}).includes(paymentIntentId)) return charge;
-  await syncChargeFromPaymentIntent(await stripe().paymentIntents.retrieve(paymentIntentId));
-  return (await getCharge(charge._id)) ?? charge;
+ * yet). Only an intent that belongs to this bill is read. The notices
+ * are the caller's to send: if this is the first anyone has seen of the
+ * payment, nobody else will be handed them. */
+export async function refreshCharge(charge: BillingCharge, paymentIntentId: string): Promise<{ charge: BillingCharge; notices: PlanNotice[] }> {
+  if (!Object.values(charge.payment_intents ?? {}).includes(paymentIntentId)) return { charge, notices: [] };
+  const notices = await syncChargeFromPaymentIntent(await stripe().paymentIntents.retrieve(paymentIntentId));
+  return { charge: (await getCharge(charge._id)) ?? charge, notices };
+}
+
+/** A refund made in Stripe's dashboard: write what has been refunded onto
+ * the bill it was for, or hand it to the plan whose monthly payment it
+ * was, and tell the guides. Stripe's charge carries the running total,
+ * so a second partial refund reads as the new total, not a new refund. */
+async function syncRefund(ch: Stripe.Charge): Promise<PlanNotice[]> {
+  const piId = typeof ch.payment_intent === "string" ? ch.payment_intent : (ch.payment_intent?.id ?? null);
+  if (!piId || !ch.amount_refunded) return [];
+  const pi = await stripe().paymentIntents.retrieve(piId);
+  const chargeId = pi.metadata?.charge_id;
+  if (!chargeId) return planPaymentRefunded(piId, ch.amount_refunded, ch.amount);
+  const charge = await getCharge(chargeId);
+  if (!charge || charge.stripe_payment_intent_id !== piId) return [];
+  if ((charge.refunded_cents ?? 0) >= ch.amount_refunded) return [];
+  const now = new Date().toISOString();
+  await merge(CHARGES, charge._id, { refunded_cents: ch.amount_refunded, refunded_at: now, updated_at: now });
+  return [{ type: "refunded", folderId: charge.project_folder_id, what: charge.label, refundedCents: ch.amount_refunded, paidCents: ch.amount }];
 }
 
 // ─── Webhook events ─────────────────────────────────────────────────────
@@ -350,6 +399,11 @@ export async function applyStripeEvent(event: Stripe.Event): Promise<{ applied: 
     case "payment_intent.canceled": {
       const pi = await stripe().paymentIntents.retrieve((event.data.object as Stripe.PaymentIntent).id);
       notices = await syncChargeFromPaymentIntent(pi);
+      break;
+    }
+    case "charge.refunded": {
+      const ch = await stripe().charges.retrieve((event.data.object as Stripe.Charge).id);
+      notices = await syncRefund(ch);
       break;
     }
     default:

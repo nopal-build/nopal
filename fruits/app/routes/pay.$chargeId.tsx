@@ -14,6 +14,7 @@ import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-
 import { getUser } from "../modules/auth/auth.server";
 import { navFor } from "../data/nav.server";
 import { isClientOn, personFromPayLink } from "../data/payments.server";
+import { sendPlanNotices } from "../data/billingNotices.server";
 import { getCharge, isPayable, paymentIntentSecretFor, refreshCharge } from "robustness-core/data/billing.server";
 import { categoryFor, discountNote, formatUsd } from "robustness-core/data/billingRules";
 import { TERMS_PREAMBLE, termsAreDraft, termsFor } from "robustness-core/data/billingTerms";
@@ -47,7 +48,12 @@ export async function loader({ request, params }: LoaderFunctionArgs) {
   // Back from Stripe (a bank login or card check): read where it stands
   // now rather than wait for the webhook.
   const returned = url.searchParams.get("payment_intent");
-  if (returned) charge = await refreshCharge(charge, returned);
+  if (returned) {
+    const read = await refreshCharge(charge, returned);
+    charge = read.charge;
+    // First to see the payment: the confirmation is this page's to send.
+    await sendPlanNotices(read.notices, url.origin);
+  }
 
   // Stripe sends the client back here; a link visitor keeps their link.
   const back = new URL(`/pay/${charge._id}`, url.origin);

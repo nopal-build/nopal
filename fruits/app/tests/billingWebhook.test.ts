@@ -13,6 +13,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const store = vi.hoisted(() => new Map<string, Record<string, unknown>>());
 const canceledIds = vi.hoisted(() => [] as string[]);
 const retrieve = vi.hoisted(() => ({ fn: (_id: string): Promise<unknown> => Promise.reject(new Error("unset")) }));
+// The charge Stripe answers a refund's re-read with.
+const refundedCharge = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
 vi.hoisted(() => {
   process.env.STRIPE_SECRET_KEY = "sk_test_unit";
   process.env.STRIPE_WEBHOOK_SECRET = "whsec_unit";
@@ -22,7 +24,17 @@ vi.mock("robustness-core/data/generic.server", () => {
   const key = (rid: { tb: string; id: unknown }) => `${rid.tb}:${String(rid.id)}`;
   return {
     defineTable: async () => {},
-    query: async () => [[]],
+    query: async (sql: string, vars: { rec?: { tb: string; id: unknown }; at?: string } = {}) => {
+      // The say-it-once claim: set the field only if nothing has.
+      const claimed = /^UPDATE \$rec SET (\w+) = \$at WHERE/.exec(sql);
+      if (claimed && vars.rec) {
+        const row = store.get(key(vars.rec));
+        if (!row || row[claimed[1]] != null) return [[]];
+        store.set(key(vars.rec), { ...row, [claimed[1]]: vars.at });
+        return [[vars.rec]];
+      }
+      return [[]];
+    },
     formatRecord: (r: unknown) => r,
     newRecordId: () => `r${store.size + 1}`,
     select: async (rid: { tb: string; id: unknown }) => {
@@ -52,13 +64,14 @@ vi.mock("robustness-core/data/stripe.server", async () => {
         return { id, status: "canceled" };
       },
     },
+    charges: { retrieve: async () => refundedCharge.value },
   };
   return { ...actual, stripe: () => fake };
 });
 
 vi.mock("../data/billingNotices.server", () => ({ sendPlanNotices: async () => {} }));
 
-import { applyStripeEvent } from "robustness-core/data/billing.server";
+import { applyStripeEvent, getCharge, refreshCharge } from "robustness-core/data/billing.server";
 import { stripe } from "robustness-core/data/stripe.server";
 import { action } from "../routes/api.stripe.webhook";
 
@@ -285,5 +298,88 @@ describe("POST /api/stripe/webhook", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     expect((await post(body, await sign(body))).status).toBe(500);
     expect(marked("evt_http")).toBe(false);
+  });
+});
+
+// Who says "it's paid" (2026-11-20). Stripe sends a Client who paid back
+// to the pay page, which reads the payment at once; the webhook lands a
+// moment later. The page used to drop its notice and the webhook, finding
+// the bill paid, had none, so nobody was told. Whoever sees the payment
+// first is handed the notice, once.
+describe("the confirmation is sent once, by whoever sees the payment first", () => {
+  const page = async () => refreshCharge((await getCharge("sue1"))!, "pi_sue");
+
+  it("the pay page first: the page is handed it, the webhook after has nothing to say", async () => {
+    stripeSays(pi("succeeded"), pi("requires_payment_method", { payer: "tom" }));
+    const read = await page();
+    expect(read.charge.status).toBe("paid");
+    expect(read.notices).toMatchObject([{ type: "charge_paid", chargeId: "sue1", payerId: "sue", clearing: false }]);
+    expect((await applyStripeEvent(event("evt_1", "payment_intent.succeeded", pi("succeeded")))).notices).toEqual([]);
+  });
+
+  it("the webhook first: it is handed it, the page after has nothing to say", async () => {
+    stripeSays(pi("succeeded"), pi("requires_payment_method", { payer: "tom" }));
+    expect((await applyStripeEvent(event("evt_1", "payment_intent.succeeded", pi("succeeded")))).notices).toMatchObject([{ type: "charge_paid", payerId: "sue" }]);
+    expect((await page()).notices).toEqual([]);
+  });
+
+  it("a bank transfer is said once, when it starts clearing, and not again when it settles", async () => {
+    stripeSays(pi("processing"));
+    expect((await page()).notices).toMatchObject([{ type: "charge_paid", clearing: true }]);
+    stripeSays(pi("succeeded"));
+    expect((await applyStripeEvent(event("evt_2", "payment_intent.succeeded", pi("succeeded")))).notices).toEqual([]);
+  });
+
+  it("a payment that came back and is paid again is news again", async () => {
+    stripeSays(pi("processing"));
+    await page();
+    stripeSays(pi("requires_payment_method", { failed: true }));
+    await applyStripeEvent(event("evt_2", "payment_intent.payment_failed", pi("requires_payment_method")));
+    stripeSays(pi("succeeded"));
+    expect((await applyStripeEvent(event("evt_3", "payment_intent.succeeded", pi("succeeded")))).notices).toMatchObject([{ type: "charge_paid" }]);
+  });
+
+  it("an intent that isn't this bill's is not read", async () => {
+    stripeSays(pi("succeeded"));
+    const read = await refreshCharge((await getCharge("sue1"))!, "pi_someone_else");
+    expect(read.notices).toEqual([]);
+    expect(read.charge.status).toBe("open");
+  });
+});
+
+// Refunds are made in Stripe's dashboard by hand; O.No hears and shows it
+// (Austin, 2026-11-20). The bill stays paid; what went back is written
+// beside it and the guides are told.
+describe("a refund made in Stripe", () => {
+  const paid = async () => {
+    stripeSays(pi("succeeded"), pi("requires_payment_method", { payer: "tom" }));
+    await applyStripeEvent(event("evt_paid", "payment_intent.succeeded", pi("succeeded")));
+  };
+  const refund = (id: string, cents: number, intent = "pi_sue") => {
+    refundedCharge.value = { id: "ch_1", amount: 1_000_00, amount_refunded: cents, payment_intent: intent };
+    return applyStripeEvent(event(id, "charge.refunded", { id: "ch_1" }));
+  };
+
+  it("is written on the bill it was for, which stays paid, and the guides are told", async () => {
+    await paid();
+    const { notices } = await refund("evt_r1", 1_000_00);
+    expect(charge()).toMatchObject({ status: "paid", refunded_cents: 1_000_00 });
+    expect(charge()?.refunded_at).toBeTruthy();
+    expect(notices).toEqual([{ type: "refunded", folderId: "madison-attic", what: "Report", refundedCents: 1_000_00, paidCents: 1_000_00 }]);
+  });
+
+  it("a second part refund reads as the new total, and the same total twice says nothing", async () => {
+    await paid();
+    expect((await refund("evt_r1", 250_00)).notices).toMatchObject([{ refundedCents: 250_00 }]);
+    expect((await refund("evt_r2", 250_00)).notices).toEqual([]);
+    expect((await refund("evt_r3", 600_00)).notices).toMatchObject([{ refundedCents: 600_00, paidCents: 1_000_00 }]);
+    expect(charge()?.refunded_cents).toBe(600_00);
+  });
+
+  it("a refund of the other Client's closed intent touches nothing", async () => {
+    await paid();
+    stripeSays(pi("succeeded"), pi("canceled", { payer: "tom" }));
+    expect((await refund("evt_r1", 1_000_00, "pi_tom")).notices).toEqual([]);
+    expect(charge()?.refunded_cents).toBeUndefined();
   });
 });

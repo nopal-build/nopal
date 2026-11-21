@@ -7,7 +7,7 @@
  */
 import { listChargesForProjects } from "robustness-core/data/billing.server";
 import { listPlans } from "robustness-core/data/billingPlans.server";
-import { MENU_PLANS, MENU_PLAN_LABELS, ONE_TIME_KINDS, ONE_TIME_LABELS, discountNote, formatUsd, hasTypedAmount } from "robustness-core/data/billingRules";
+import { MENU_PLANS, MENU_PLAN_LABELS, ONE_TIME_KINDS, ONE_TIME_LABELS, discountNote, formatUsd, hasTypedAmount, refundNote } from "robustness-core/data/billingRules";
 import { priceFor, stripeConfigured } from "robustness-core/data/stripe.server";
 import { describePlan } from "./billingNotices.server";
 
@@ -47,6 +47,7 @@ export async function projectPaymentsViews(projects: { id: string; members: Memb
               amount: formatUsd(c.amount_cents),
               discount: discountNote(c.list_amount_cents, c.discount_percent),
               status: c.status,
+              refunded: refundNote(c.amount_cents, c.refunded_cents),
               category: c.category,
               paidBy: c.paid_by_human_id ? (names.get(c.paid_by_human_id) ?? "someone no longer on the project") : null,
               payLink: `${origin}/pay/${c._id}`,

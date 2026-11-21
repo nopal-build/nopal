@@ -75,6 +75,7 @@ vi.mock("robustness-core/data/stripe.server", () => {
     setupIntents: { retrieve: async () => fx.setupIntent },
     paymentMethods: { retrieve: async () => fx.paymentMethod },
     invoices: { retrieve: async () => fx.invoice },
+    invoicePayments: { list: async () => ({ data: fx.invoice.id ? [{ invoice: fx.invoice.id }] : [] }) },
     subscriptionSchedules: {
       create: async (params: Record<string, unknown>) => {
         calls.scheduleCreates.push(params);
@@ -124,6 +125,7 @@ vi.mock("robustness-core/data/stripe.server", () => {
   };
 });
 
+import { planPaymentRefunded } from "robustness-core/data/billingPlans.server";
 import { applyPlanEvent, approveLevelRequest, approveResume, cancelPlan, changePlan, declineLevelRequest, getPlan, isOnHold, pauseCheck, pausePlan, requestLevel, setPlanLevel } from "robustness-core/data/billingPlans.server";
 import { dayIn, firstBillingTime } from "robustness-core/data/billingRules";
 
@@ -528,5 +530,35 @@ describe("a plan after a plan", () => {
     await linked("tom");
     expect(calls.scheduleCreates).toHaveLength(2);
     expect(plan()).toMatchObject({ status: "active", payer_human_id: "tom" });
+  });
+});
+
+// A plan's monthly payment refunded in Stripe (Austin, 2026-11-20): found
+// through the invoice it paid, written on the plan by invoice for the
+// ledger, and the guides told.
+describe("a plan payment refunded in Stripe", () => {
+  const running = async () => {
+    await setPlanLevel({ folderId: "attic", level: "guide", startDay: TODAY });
+    await linked();
+    fx.invoice = { id: "in_1", parent: { subscription_details: { subscription: "sub_1", metadata: { project_folder_id: "attic" } } } };
+  };
+
+  it("is written on the plan under its invoice, and the guides are told", async () => {
+    await running();
+    expect(await planPaymentRefunded("pi_month", 300000, 300000)).toEqual([{ type: "refunded", folderId: "attic", what: null, refundedCents: 300000, paidCents: 300000 }]);
+    expect(plan()?.refunds).toMatchObject({ in_1: { cents: 300000 } });
+  });
+
+  it("the same total twice says nothing; a larger total is the new one", async () => {
+    await running();
+    await planPaymentRefunded("pi_month", 100000, 300000);
+    expect(await planPaymentRefunded("pi_month", 100000, 300000)).toEqual([]);
+    expect(await planPaymentRefunded("pi_month", 300000, 300000)).toMatchObject([{ refundedCents: 300000 }]);
+  });
+
+  it("a payment that paid no invoice is nobody's plan", async () => {
+    await running();
+    fx.invoice = {};
+    expect(await planPaymentRefunded("pi_other", 5000, 5000)).toEqual([]);
   });
 });

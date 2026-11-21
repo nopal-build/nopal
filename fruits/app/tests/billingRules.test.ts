@@ -155,3 +155,11 @@ describe("the card fee on a plan", () => {
     expect(cardFeeCents(500, "card", "credit")).toBe(15);
   });
 });
+
+import { refundNote } from "robustness-core/data/billingRules";
+it("a refund reads Refunded when all of it went back, with the amounts when part did, and not at all when none did", () => {
+  expect(refundNote(100_00, 100_00)).toBe("Refunded");
+  expect(refundNote(200_00, 50_00)).toBe("Refunded $50 of $200");
+  expect(refundNote(200_00, 0)).toBeNull();
+  expect(refundNote(200_00, null)).toBeNull();
+});

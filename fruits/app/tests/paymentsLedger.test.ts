@@ -90,3 +90,34 @@ describe("the ledger", () => {
     expect([...l.needsYou, ...l.upcoming, ...l.recent]).toEqual([]);
   });
 });
+
+// Refunds made in Stripe (Austin, 2026-11-20): Recent shows what went
+// back in place of what was paid, for a bill and for a plan's month.
+describe("refunds in the ledger", () => {
+  it("a refunded bill reads Refunded with the amount that went back; a part refund says of how much", () => {
+    const l = ledger(
+      [
+        charge({ _id: "full", status: "paid", paid_at: "2026-11-02T00:00:00Z", refunded_cents: 250_00, refunded_at: "2026-11-03T00:00:00Z" }),
+        charge({ _id: "part", status: "paid", paid_at: "2026-11-02T00:00:00Z", refunded_cents: 100_00, refunded_at: "2026-11-03T00:00:00Z" }),
+        charge({ _id: "kept", status: "paid", paid_at: "2026-11-02T00:00:00Z" }),
+      ],
+      [],
+    );
+    const row = (key: string) => l.recent.find((r) => r.key === key);
+    expect(row("full")).toMatchObject({ state: "refunded", amountCents: 250_00, note: null });
+    expect(row("part")).toMatchObject({ state: "refunded", amountCents: 100_00, note: "of $250" });
+    expect(row("kept")).toMatchObject({ state: "paid", amountCents: 250_00 });
+  });
+
+  it("a plan's refunded month reads Refunded, the other months as they were", () => {
+    const invoices = new Map([
+      ["kitchen", [
+        { id: "in_oct", amountCents: 300_000, status: "paid", at: "2026-10-20T12:00:00Z" },
+        { id: "in_sep", amountCents: 300_000, status: "paid", at: "2026-09-20T12:00:00Z" },
+      ]],
+    ]);
+    const l = ledger([], [plan({ refunds: { in_oct: { cents: 300_000, at: "2026-10-25T00:00:00Z" } } })], invoices);
+    expect(l.recent.find((r) => r.key === "in_oct")).toMatchObject({ state: "refunded", amountCents: 300_000, note: null });
+    expect(l.recent.find((r) => r.key === "in_sep")).toMatchObject({ state: "paid", amountCents: 300_000 });
+  });
+});
