@@ -39,6 +39,8 @@ export type ProjectChargeView = {
   amount: string;
   discount: string | null;
   status: ChargeStatusView;
+  /** "Refunded", or "Refunded $50 of $200": said in place of the status. */
+  refunded: string | null;
   category: string;
   paidBy: string | null;
   payLink: string;
@@ -371,7 +373,7 @@ function ChargeRow({ charge, action }: { charge: ProjectChargeView; action: stri
             {charge.discount}
           </span>
         )}
-        <Badge>{CHARGE_STATUS_LABEL[charge.status]}</Badge>
+        <Badge>{charge.refunded ?? CHARGE_STATUS_LABEL[charge.status]}</Badge>
         {charge.attachments.length > 0 && (
           <span className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
             {charge.attachments.length === 1 ? charge.attachments[0] : `${charge.attachments.length} files`}

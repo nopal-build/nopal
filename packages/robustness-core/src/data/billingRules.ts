@@ -105,6 +105,13 @@ export function discountNote(listCents: number | null | undefined, percent: numb
   return percent && listCents ? `${percent}% off ${formatUsd(listCents)}` : null;
 }
 
+/** How a refund reads beside a payment: "Refunded" when all of it went
+ * back, "Refunded $50 of $200" for part, null when none did. */
+export function refundNote(paidCents: number, refundedCents: number | null | undefined): string | null {
+  if (!refundedCents || refundedCents <= 0) return null;
+  return refundedCents >= paidCents ? "Refunded" : `Refunded ${formatUsd(refundedCents)} of ${formatUsd(paidCents)}`;
+}
+
 export function formatUsd(cents: number): string {
   const dollars = cents / 100;
   return `$${dollars.toLocaleString("en-US", {
@@ -131,6 +138,7 @@ export const HANDLED_STRIPE_EVENTS = [
   "payment_intent.succeeded",
   "payment_intent.payment_failed",
   "payment_intent.canceled",
+  "charge.refunded",
   "setup_intent.succeeded",
   "customer.subscription.created",
   "customer.subscription.updated",

@@ -3,8 +3,9 @@
 // through the real webhook (`stripe listen` forwarding to the app):
 //   1. A bill on a project with two Clients: both get the email; a signed
 //      link opens the pay page with no login, and not for the guide; the
-//      second Client pays; the bill records who paid; the other Client's
-//      intent closes.
+//      second Client pays and lands back on the pay page, as a browser
+//      does; the bill records who paid; the confirmation goes once; the
+//      other Client's intent closes; a refund made in Stripe is heard.
 //   2. A Guide plan: the guide's pick waits; a Client links a bank account;
 //      one schedule starts, bank transfer only; the first $3,000 debit pays.
 //   3. A Client asks for a different level and the guide decides: approved
@@ -157,6 +158,12 @@ async function main() {
     const opened = (await getCharge(charge._id))!;
     check("each Client has their own intent", Object.keys(opened.payment_intents).length === 2);
     await s.paymentIntents.confirm(opened.payment_intents[tom._id], { payment_method: "pm_card_visa", return_url: `${APP}/pay/${charge._id}` });
+    // What a browser does next: Stripe sends Tom back to the pay page,
+    // which reads the payment at once, racing the webhook. Whichever is
+    // first sends the confirmation; the check below is that it is sent,
+    // and once (before 2026-11-20 the page won and nobody was told).
+    const backFromStripe = await fetch(`${signedPayLink(APP, charge._id, tom._id)}&payment_intent=${opened.payment_intents[tom._id]}`, { redirect: "manual" });
+    check("Tom lands back on the pay page", backFromStripe.status === 200, String(backFromStripe.status));
     const paid = await until("bill paid", () => getCharge(charge._id), (c) => c?.status === "paid");
     check("bill paid through the webhook", paid?.status === "paid", paid?.status);
     check("records Tom as the payer", paid?.paid_by_human_id === tom._id);
@@ -165,7 +172,12 @@ async function main() {
     const sueIntent = await until("Sue's intent closed", () => s.paymentIntents.retrieve(opened.payment_intents[sue._id]), (pi) => pi.status === "canceled", 15);
     check("Sue's intent closed", sueIntent.status === "canceled", sueIntent.status);
     check("Tom gets a payment confirmation", (await until("mail", () => mailTo(tom.email, "Payment received"), (n) => n > 0, 15)) === 1);
-    check("the guide hears it's paid", (await mailTo(guide.email, " paid $1,000")) >= 1);
+    check("the guide hears it's paid, once", (await until("mail", () => mailTo(guide.email, ` paid $1,000 for Billing walk ${stamp}`), (n) => n > 0, 15)) === 1);
+    // A refund made in Stripe (here through the API, as the dashboard does).
+    await s.refunds.create({ payment_intent: opened.payment_intents[tom._id], amount: 250_00 });
+    const partBack = await until("refund heard", () => getCharge(charge._id), (c) => c?.refunded_cents === 250_00, 30);
+    check("a part refund is written on the bill, which stays paid", partBack?.refunded_cents === 250_00 && partBack?.status === "paid", `${partBack?.refunded_cents}, ${partBack?.status}`);
+    check("the guide hears of the refund", (await until("mail", () => mailTo(guide.email, `$250 refunded on Billing walk ${stamp}`), (n) => n > 0, 15)) === 1);
 
     // ── 2. A plan ─────────────────────────────────────────────────────
     console.log("2. The guide picks Guide; Sue links a bank account");
@@ -365,6 +377,12 @@ async function main() {
     check("the fee is its own line on the receipt", JSON.stringify(lines) === "[8730,300000]", JSON.stringify(lines));
     check("the ledger reads it from Stripe", (await listPlanInvoices(cardSub.id, new Date(0), "card")).some((i) => i.amountCents === 308730 && i.status === "paid"));
     check("Tom's receipt names the fee", (await until("mail", () => mailTo(tom.email, "Payment received: $3,087.30"), (n) => n > 0, 20)) >= 1);
+    // The month refunded in Stripe: found through the invoice it paid.
+    const monthPaid = (await s.invoicePayments.list({ invoice: firstCard[0].id!, limit: 1 })).data[0]?.payment?.payment_intent;
+    await s.refunds.create({ payment_intent: typeof monthPaid === "string" ? monthPaid : monthPaid!.id });
+    plan = await until("month refund heard", () => getPlan(folder._id), (p) => !!p?.refunds?.[firstCard[0].id!], 30);
+    check("a refunded month is written on the plan under its invoice", plan?.refunds?.[firstCard[0].id!]?.cents === 308730, JSON.stringify(plan?.refunds));
+    check("the guide hears of that refund", (await until("mail", () => mailTo(guide.email, `$3,087.30 refunded on Billing walk ${stamp}`), (n) => n > 0, 15)) === 1);
 
     const cardNow = new Date((await s.testHelpers.testClocks.retrieve(clock3.id)).frozen_time * 1000);
     await sendPlanNotices(await changePlan((await getPlan(folder._id))!, "deep_guide", cardNow), APP);

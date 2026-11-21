@@ -74,7 +74,7 @@ import { listPlans } from "robustness-core/data/billingPlans.server";
 import { describePlan } from "../data/billingNotices.server";
 import { listChargesForProjects } from "robustness-core/data/billing.server";
 import { clientProjectsFor } from "../data/payments.server";
-import { MENU_PLANS, MENU_PLAN_LABELS, formatUsd } from "robustness-core/data/billingRules";
+import { MENU_PLANS, MENU_PLAN_LABELS, formatUsd, refundNote } from "robustness-core/data/billingRules";
 import { useHome } from "../hooks/useUser";
 import { displayName } from "robustness-core/data/humanNames";
 import { Input } from "stamps/Input";
@@ -138,6 +138,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     label: c.label,
     amount: formatUsd(c.amount_cents),
     status: c.status,
+    refunded: refundNote(c.amount_cents, c.refunded_cents),
     project: projectNames.get(c.project_folder_id) ?? "A project",
   }));
 

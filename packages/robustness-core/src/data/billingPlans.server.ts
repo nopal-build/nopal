@@ -53,7 +53,7 @@ import {
 } from "./billingRules";
 import { assertTermsUsable, termsFor } from "./billingTerms";
 import { CARD_FEE_PRODUCT_ID, RECURRING_METHODS, ensureCardFeeProduct, priceFor, stripe } from "./stripe.server";
-import { ensureCustomer } from "./billing.server";
+import { claimOnce, ensureCustomer } from "./billing.server";
 import { billOnHold, isOnHold } from "./planHold.server";
 
 const PLANS = "billing_plans";
@@ -119,6 +119,9 @@ export type BillingPlan = Data & {
   hold_since?: string | null;
   /** When the plan's debits started failing (Stripe's `past_due`). */
   past_due_since?: string | null;
+  /** Monthly payments refunded in Stripe's dashboard, by invoice id: what
+   * the ledger shows beside a payment it reads from Stripe. */
+  refunds?: Record<string, { cents: number; at: string }> | null;
   terms_version: string | null;
   accepted_at: string | null;
   updated_at: string;
@@ -140,7 +143,10 @@ export type PlanNotice =
   | { type: "work_on_hold"; folderId: string; reason: "no_bank" | "debit_failed" | "bill_overdue"; since: string }
   | { type: "hold_lifted"; folderId: string }
   | { type: "charge_paid"; folderId: string; chargeId: string; payerId: string; clearing: boolean; wasHeld: boolean }
-  | { type: "plan_paid"; folderId: string; amountCents: number };
+  | { type: "plan_paid"; folderId: string; amountCents: number }
+  /** Money went back, in Stripe's dashboard: `what` is the bill's label,
+   * or null for a plan's monthly payment. The totals are Stripe's. */
+  | { type: "refunded"; folderId: string; what: string | null; refundedCents: number; paidCents: number };
 
 const SETTLED: PlanStatus[] = ["none", "canceled"];
 /** A plan with a live subscription behind it. */
@@ -755,13 +761,8 @@ export { isOnHold } from "./planHold.server";
  * in one statement, and say whether this caller was the one who did.
  * Production runs two machines and each runs the daily check, so "read
  * that it's unset, then write it" would let both send the same email. */
-async function claim(table: string, id: string, field: "hold_since" | "pause_warned_at" | "pause_alerted_at" | "hold_notified_at", at: string): Promise<boolean> {
-  const result = await query<[unknown[]]>(`UPDATE $rec SET ${field} = $at WHERE ${field} = NONE OR ${field} = NULL RETURN VALUE id`, {
-    rec: new RecordId(table, id),
-    at,
-  });
-  return (result?.[0] ?? []).length > 0;
-}
+const claim = (table: string, id: string, field: "hold_since" | "pause_warned_at" | "pause_alerted_at" | "hold_notified_at", at: string) =>
+  claimOnce(table, id, field, at);
 
 /** The daily check. Money 10 days past due puts work on hold and says
  * so, once: a plan with no bank linked, a plan whose debit failed, a bill
@@ -802,6 +803,28 @@ export async function pauseCheck(now = new Date()): Promise<PlanNotice[]> {
     notices.push({ type: "work_on_hold", folderId: bill.project_folder_id, reason: "bill_overdue", since: billDueAt(bill.created_at).toISOString() });
   }
   return notices;
+}
+
+/** A plan's monthly payment was refunded in Stripe's dashboard. The
+ * payment is found through the invoice it paid, which names the project
+ * (one Client can pay plans on two projects, so the customer alone
+ * doesn't). Written onto the plan by invoice, for the ledger. */
+export async function planPaymentRefunded(paymentIntentId: string, refundedCents: number, paidCents: number): Promise<PlanNotice[]> {
+  const { data } = await stripe().invoicePayments.list({ payment: { type: "payment_intent", payment_intent: paymentIntentId }, limit: 1 });
+  const ref = data[0]?.invoice;
+  const invoiceId = typeof ref === "string" ? ref : (ref?.id ?? null);
+  if (!invoiceId) return [];
+  const invoice = await stripe().invoices.retrieve(invoiceId);
+  const subRef = invoice.parent?.subscription_details?.subscription;
+  const subId = typeof subRef === "string" ? subRef : subRef?.id;
+  const folderId =
+    invoice.parent?.subscription_details?.metadata?.project_folder_id ?? (subId ? folderOf(await stripe().subscriptions.retrieve(subId)) : null);
+  if (!folderId) return [];
+  const plan = await getPlan(folderId);
+  if (!plan) return [];
+  if ((plan.refunds?.[invoiceId]?.cents ?? 0) >= refundedCents) return [];
+  await savePlan(folderId, { refunds: { ...(plan.refunds ?? {}), [invoiceId]: { cents: refundedCents, at: new Date().toISOString() } } });
+  return [{ type: "refunded", folderId, what: null, refundedCents, paidCents }];
 }
 
 export type PlanInvoice = { id: string; amountCents: number; status: "paid" | "clearing"; at: string };

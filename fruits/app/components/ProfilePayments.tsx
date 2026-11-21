@@ -25,6 +25,8 @@ export type ProfileCharge = {
   label: string;
   amount: string;
   status: "open" | "processing" | "paid" | "failed" | "canceled";
+  /** "Refunded", or "Refunded $50 of $200": said in place of the status. */
+  refunded: string | null;
   project: string;
 };
 
@@ -169,7 +171,7 @@ export function ProfilePayments({
             <span className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
               {c.project}
             </span>
-            <Badge>{STATUS[c.status]}</Badge>
+            <Badge>{c.refunded ?? STATUS[c.status]}</Badge>
             {(c.status === "open" || c.status === "failed") && (
               <Link to={`/pay/${c.id}`} className={`${link} ${textSize.sm}`}>
                 Pay →

@@ -71,6 +71,7 @@ const STATE_LABEL: Record<LedgerState, string> = {
   awaiting_bank: "Waiting for a bank account or card",
   paid: "Paid",
   clearing: "Clearing",
+  refunded: "Refunded",
 };
 
 type RowView = LedgerRow & { date: string; amount: string | null };
