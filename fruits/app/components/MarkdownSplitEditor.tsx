@@ -15,7 +15,7 @@ import { ActionBar, ActionBarButton, ActionBarGroup } from "stamps/ActionBar";
 import { button as actionBarButtonClass } from "stamps/actionBar.css";
 import { ExpandIcon } from "stamps/ExpandIcon";
 import { LayoutFlipIcon } from "stamps/LayoutFlipIcon";
-import { useStickyPaneMaxHeight } from "stamps/useStickyPaneMaxHeight";
+import { findScrollingAncestor, useStickyPaneMaxHeight } from "stamps/useStickyPaneMaxHeight";
 import { insertAtSelection } from "../oxmarkdown/insertAtSelection";
 import { letterLengthLabel } from "./letterLength";
 import "../styles/vault.css";
@@ -294,6 +294,33 @@ export function MarkdownSplitEditor({
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [isMobile, mobileView, body]);
+
+  // Desktop: the Markdown follows the page. As the rendered page scrolls
+  // past, the textarea scrolls to the same fraction of its own length, so
+  // the words being read on the right are near the words on the left
+  // (Austin, 2026-11-21: "It should grow and scroll with the rendering so
+  // you can naturally see what you are editing in real time").
+  // Proportional, so it drifts around a picture, which is one line here
+  // and a tall block there; Austin took that drift over tagging rendered
+  // blocks with their source lines. Only a scroll of the page moves the
+  // textarea: typing never does, so the cursor stays where it is.
+  useEffect(() => {
+    if (isMobile || reading) return;
+    const preview = previewBodyRef.current;
+    const scroller = preview ? findScrollingAncestor(preview) : null;
+    if (!preview || !scroller) return;
+    function follow() {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const travel = preview!.getBoundingClientRect().height - scroller!.clientHeight;
+      const room = textarea.scrollHeight - textarea.clientHeight;
+      if (travel <= 0 || room <= 0) return;
+      const scrolledPast = scroller!.getBoundingClientRect().top - preview!.getBoundingClientRect().top;
+      textarea.scrollTop = Math.min(1, Math.max(0, scrolledPast / travel)) * room;
+    }
+    scroller.addEventListener("scroll", follow, { passive: true });
+    return () => scroller.removeEventListener("scroll", follow);
+  }, [isMobile, reading]);
 
   const handleSave = useCallback(() => {
     if (!editable || !isDirty) return;

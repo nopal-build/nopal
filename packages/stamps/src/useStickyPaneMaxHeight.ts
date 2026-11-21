@@ -36,7 +36,7 @@ import { useEffect, useState, type RefObject } from "react";
  * `el`, walking up `parentElement` generically rather than assuming any
  * particular caller's own DOM shape (normally `AppLayout`'s `<main>`, but
  * this file doesn't know or care). */
-function findScrollingAncestor(el: HTMLElement): HTMLElement | null {
+export function findScrollingAncestor(el: HTMLElement): HTMLElement | null {
   let node = el.parentElement;
   while (node) {
     const overflowY = getComputedStyle(node).overflowY;
@@ -83,16 +83,26 @@ export function useStickyPaneMaxHeight(
       const paddingBottom = parseFloat(style.paddingBottom) || 0;
       const available = scroller!.clientHeight - paddingTop - paddingBottom;
 
-      // How far below the scroller's own content-top this pane naturally
-      // starts, pre-stick (see this file's own header for why -- valid as
-      // measured here since `recompute` only ever runs on mount/resize,
-      // never on plain scroll, so it isn't reading a stuck/clamped
-      // position by the time this runs in the common case).
+      // How far below the scroller's own top edge this pane sits RIGHT
+      // NOW (see this file's own header for why the offset matters at
+      // all). Read live, on every scroll as well as every resize: the
+      // pane takes whatever is left under the things above it while they
+      // are on screen, and grows to the full available height as they
+      // scroll away and it sticks. It used to be the pre-stick offset,
+      // measured once -- right for Vault's split editor, where only a
+      // breadcrumb and a toolbar sit above the pane, and wrong at the
+      // letter desk, where a whole brief does: the pane stayed as small
+      // as the space under the brief for as long as the page was open
+      // (Austin, 2026-11-21: "the editor stays small and in some cases
+      // shrinks"), and a resize while scrolled measured a stuck position
+      // as if it were the natural one. At the top of the page this is the
+      // same number as before; a no-op for `DrawerContent` (offset 0
+      // either way).
       const paneRect = paneEl!.getBoundingClientRect();
       const scrollerRect = scroller!.getBoundingClientRect();
-      const naturalOffset = paneRect.top - scrollerRect.top + scroller!.scrollTop;
+      const visibleOffset = Math.max(0, paneRect.top - scrollerRect.top);
 
-      const raw = available - naturalOffset;
+      const raw = Math.round(available - visibleOffset);
       // A REAL BUG, found via a real repro, not just reasoning about the
       // math: a non-positive `raw` here has always meant "this particular
       // measurement is garbage" in every case actually seen -- `available`
@@ -100,7 +110,7 @@ export function useStickyPaneMaxHeight(
       // resolved a definite height yet at that exact moment (a `height:
       // 100%`-up-the-chain layout, like `appLayoutShell.css.ts`'s, only
       // resolves once EVERY ancestor up to `<html>` has one -- timing-
-      // sensitive around hydration/first paint), OR `naturalOffset` coming
+      // sensitive around hydration/first paint), OR the offset coming
       // out anomalously large for some other transient reason -- NEVER a
       // legitimate "this sticky sidebar genuinely has zero room." The old
       // code trusted it anyway (`Math.max(0, raw)`), silently clamping to
@@ -121,7 +131,13 @@ export function useStickyPaneMaxHeight(
     recompute();
     const resizeObserver = new ResizeObserver(recompute);
     resizeObserver.observe(scroller);
-    return () => resizeObserver.disconnect();
+    // Same value while the pane is stuck, so React re-renders only over
+    // the stretch where the things above the pane are scrolling away.
+    scroller.addEventListener("scroll", recompute, { passive: true });
+    return () => {
+      resizeObserver.disconnect();
+      scroller.removeEventListener("scroll", recompute);
+    };
   }, [paneRef, disabled]);
 
   return maxHeight;
