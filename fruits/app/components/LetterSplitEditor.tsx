@@ -161,6 +161,9 @@ export function LetterSplitEditor({
           <OxRenderer
             markdown={rewriteViewUrls(body, (id) => `/api/letter/${fileId}/view/${id}`)}
             directives={buildWebsiteDirectiveRegistry({ dailyLogEntries: {}, forcedScheme: previewScheme })}
+            // So the editor can line the Markdown up with the page
+            // (`sourceScrollLink.ts`). `rewriteViewUrls` changes no line.
+            sourceAnchors
             className="ox-no-dots ox-no-heading-marks website-page-ox"
           />
         </WebsitePageContent>

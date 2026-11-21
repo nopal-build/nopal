@@ -19,7 +19,7 @@
  */
 
 import { cloneElement, createContext, Fragment, isValidElement, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, ReactElement, ReactNode } from "react";
 import type { Definition, RootContent } from "mdast";
 import {
   parseOxDocument,
@@ -110,6 +110,13 @@ export interface OxRendererProps {
    * `videoFileIds`), since this prop only changes what the browser asks
    * for, never what the server actually serves. */
   videoViewUrl?: (fileId: string) => string;
+  /** Marks each block with the line of the markdown it came from
+   * (`data-source-line`, 1-based), so a split editor can line its source
+   * up with what is drawn (`components/sourceScrollLink.ts`). A block
+   * that is a plain element carries the attribute itself; one drawn by a
+   * component gets an empty, zero-height marker before it. Omitted,
+   * nothing about the output changes. */
+  sourceAnchors?: boolean;
   className?: string;
 }
 
@@ -123,6 +130,7 @@ export default function OxRenderer({
   annotations,
   servedFileIds,
   videoViewUrl,
+  sourceAnchors,
   className,
 }: OxRendererProps) {
   const doc = useMemo(() => parseOxDocument(markdown), [markdown]);
@@ -178,6 +186,7 @@ export default function OxRenderer({
             servedFileIds={servedFileIds}
             videoViewUrl={videoViewUrl}
             swatchRegistry={swatchRegistry}
+            sourceAnchors={sourceAnchors}
           />
         </div>
         {annotations && <MarkMargin annotations={annotations} />}
@@ -338,6 +347,8 @@ export interface OxTreeRendererProps {
    * supplied simply always falls through to its own `fallback`, same as
    * an empty registry would (`resolveSwatchRole` tolerates `undefined`). */
   swatchRegistry?: SwatchRegistry;
+  /** See `OxRendererProps.sourceAnchors`. */
+  sourceAnchors?: boolean;
 }
 
 /** How the pen draws a Card for "Read the full log" (`marks.tsx`, which
@@ -351,7 +362,7 @@ const renderCardInPen = (markdown: string, servedFileIds?: Record<string, string
 
 /** The actual tree walk, factored out of `OxRenderer` so `OxEditor` can
  * reuse it against a document it owns and mutates. See `OxTreeRendererProps`. */
-export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder, annotations, servedFileIds, videoViewUrl, swatchRegistry }: OxTreeRendererProps) {
+export function OxTreeRenderer({ doc, directives, interactive, resolveCard, resolveGalleryFolder, annotations, servedFileIds, videoViewUrl, swatchRegistry, sourceAnchors }: OxTreeRendererProps) {
   const definitions = useMemo(() => collectDefinitions(doc), [doc]);
   const ambiguousRefFirstNames = useMemo(() => collectAmbiguousRefFirstNames(doc), [doc]);
   const annotationCtx = useMemo(
@@ -371,6 +382,7 @@ export function OxTreeRenderer({ doc, directives, interactive, resolveCard, reso
         servedFileIds,
         videoViewUrl,
         swatchRegistry,
+        sourceAnchors,
       })}
     </>
   );
@@ -396,6 +408,11 @@ interface RenderCtx {
   videoViewUrl?: (fileId: string) => string;
   /** See `OxTreeRendererProps.swatchRegistry`. */
   swatchRegistry?: SwatchRegistry;
+  /** See `OxRendererProps.sourceAnchors`. Carried down with the rest of
+   * the context, so blocks inside a quote, a list or a container are
+   * marked too; a Card or a caption is its own document with its own
+   * context and is not. */
+  sourceAnchors?: boolean;
 }
 
 /** Which first names are shared by two or more cited people in this
@@ -525,6 +542,14 @@ function renderBlockNodes(nodes: readonly unknown[], ctx: RenderCtx): ReactNode 
       const units = countBlankLines(list[i - 1], node);
       for (let s = 0; s < units; s++) {
         out.push(<div key={`spacer-${i}-${s}`} className="ox-blank-line-spacer" aria-hidden="true" />);
+      }
+    }
+    const sourceLine = ctx.sourceAnchors ? (node as { position?: { start?: { line?: number } } }).position?.start?.line : undefined;
+    if (sourceLine != null && rendered != null) {
+      if (isValidElement(rendered) && typeof rendered.type === "string") {
+        rendered = cloneElement(rendered as ReactElement<Record<string, unknown>>, { "data-source-line": sourceLine });
+      } else {
+        out.push(<div key={`source-${i}`} data-source-line={sourceLine} style={{ height: 0 }} aria-hidden="true" />);
       }
     }
     out.push(rendered);
