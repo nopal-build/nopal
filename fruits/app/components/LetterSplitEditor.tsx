@@ -37,7 +37,11 @@ export function LetterSplitEditor({
   toolbarRight,
   purpose,
   recordable = false,
+  papers,
 }: {
+  /** The letter's workings (`LetterBrief`), kept at the top of the
+   * Preview side while writing. */
+  papers?: ReactNode;
   fileId: string;
   folderId: string | null;
   /** The project the letter belongs to: where "Add picture" looks
@@ -124,6 +128,7 @@ export function LetterSplitEditor({
       onSave={onSave}
       headerLeft={headerWithPurpose}
       toolbarRight={toolbarRight}
+      previewPapers={papers}
       onInsertFiles={insertPictures}
       spellCheck
       autosave

@@ -29,6 +29,7 @@ import { AppLayout } from "../components/AppLayout";
 import { CardTabs } from "../components/stamps-candidates/CardTabs";
 import { PinnedCard, PinnedCardWall } from "../components/stamps-candidates/PinnedCard";
 import { Mailbox } from "../components/stamps-candidates/Mailbox";
+import { PaperPile } from "../components/stamps-candidates/PaperPile";
 import { SlopeGauge } from "../components/stamps-candidates/SlopeGauge";
 import { useSchemePref } from "../hooks/useSchemePref";
 import { Surface } from "stamps/Surface";
@@ -2154,6 +2155,7 @@ function CandidatesSection() {
   const [full, setFull] = useState<DemoSlopeKey | null>(null);
   const [compact, setCompact] = useState<DemoSlopeKey | null>("uphill");
   const [flagUp, setFlagUp] = useState(false);
+  const [paper, setPaper] = useState<string | null>(null);
   const [params] = useSearchParams();
   const requested = params.get("demoTab");
   const tab = DEMO_TABS.find((t) => t === requested) ?? "efforts";
@@ -2227,6 +2229,26 @@ function CandidatesSection() {
               <p className={textSize.sm}>The sheet metal shop sent the invoice for the eave flashing and drip edge today. Net 30.</p>
             </PinnedCard>
           </PinnedCardWall>
+        </Stack>
+
+        <Stack gap={3}>
+          <SpecimenCaption>PaperPile: papers to look at while doing something else (the letter desk's brief, talk and outline). The first slip is what is under the pile, and shows unless a paper is up</SpecimenCaption>
+          <div style={{ minHeight: 320, maxWidth: 560 }}>
+            <PaperPile
+              aria-label="Demo papers"
+              under="Preview"
+              up={paper}
+              onUp={setPaper}
+              sheets={[
+                { key: "brief", label: "The brief", content: <p className={textSize.sm}>What the record says, to read before writing.</p> },
+                { key: "talk", label: "Talk it through", status: "writing…", content: <p className={textSize.sm}>The writer's own words.</p> },
+                { key: "outline", label: "The outline", content: <p className={textSize.sm}>The order the letter goes in.</p> },
+              ]}
+            />
+            <p className={textSize.sm} style={{ color: semanticColors.textSubtle }}>
+              Whatever is here is covered while a sheet is up.
+            </p>
+          </div>
         </Stack>
       </Stack>
     </Section>

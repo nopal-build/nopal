@@ -15,7 +15,7 @@ import { ActionBar, ActionBarButton, ActionBarGroup } from "stamps/ActionBar";
 import { button as actionBarButtonClass } from "stamps/actionBar.css";
 import { ExpandIcon } from "stamps/ExpandIcon";
 import { LayoutFlipIcon } from "stamps/LayoutFlipIcon";
-import { useStickyPaneMaxHeight } from "stamps/useStickyPaneMaxHeight";
+import { findScrollingAncestor, useStickyPaneMaxHeight } from "stamps/useStickyPaneMaxHeight";
 import { insertAtSelection } from "../oxmarkdown/insertAtSelection";
 import { letterLengthLabel } from "./letterLength";
 import "../styles/vault.css";
@@ -86,7 +86,16 @@ export function MarkdownSplitEditor({
   autosave = false,
   showLength = false,
   toolbarTools,
+  previewPapers,
 }: {
+  /** Papers kept at the top of the Preview side, to look at while
+   * writing: a `PaperPile` (or anything that sticks to the top of its
+   * column and lays itself over what is under it). `LetterSplitEditor`'s
+   * brief, talk-through and outline. Rendered first in the Preview
+   * column with no wrapper, so it sticks for the whole length of the
+   * page; on a phone it stays above whichever pane is showing; put away
+   * while reading. */
+  previewPapers?: ReactNode;
   fileId: string;
   initialContent: string;
   editable: boolean;
@@ -266,6 +275,10 @@ export function MarkdownSplitEditor({
   const [reading, setReading] = useState(false);
 
   const isMobile = useIsMobileWebsiteEditor();
+  // A phone showing the Markdown pane, with papers to keep in reach: the
+  // stylesheet hides the whole Preview column then, pile and all, so the
+  // column is shown and only its Preview surface hidden (inline, below).
+  const papersOverMarkdown = !!previewPapers && isMobile && mobileView === "markdown" && !reading;
   const markdownPaneRef = useRef<HTMLDivElement | null>(null);
   // A real `height` (below), not a `max-height` -- the pane should always
   // FILL the available space (per this feature's own "go full height"
@@ -294,6 +307,33 @@ export function MarkdownSplitEditor({
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [isMobile, mobileView, body]);
+
+  // Desktop: the Markdown follows the page. As the rendered page scrolls
+  // past, the textarea scrolls to the same fraction of its own length, so
+  // the words being read on the right are near the words on the left
+  // (Austin, 2026-11-21: "It should grow and scroll with the rendering so
+  // you can naturally see what you are editing in real time").
+  // Proportional, so it drifts around a picture, which is one line here
+  // and a tall block there; Austin took that drift over tagging rendered
+  // blocks with their source lines. Only a scroll of the page moves the
+  // textarea: typing never does, so the cursor stays where it is.
+  useEffect(() => {
+    if (isMobile || reading) return;
+    const preview = previewBodyRef.current;
+    const scroller = preview ? findScrollingAncestor(preview) : null;
+    if (!preview || !scroller) return;
+    function follow() {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+      const travel = preview!.getBoundingClientRect().height - scroller!.clientHeight;
+      const room = textarea.scrollHeight - textarea.clientHeight;
+      if (travel <= 0 || room <= 0) return;
+      const scrolledPast = scroller!.getBoundingClientRect().top - preview!.getBoundingClientRect().top;
+      textarea.scrollTop = Math.min(1, Math.max(0, scrolledPast / travel)) * room;
+    }
+    scroller.addEventListener("scroll", follow, { passive: true });
+    return () => scroller.removeEventListener("scroll", follow);
+  }, [isMobile, reading]);
 
   const handleSave = useCallback(() => {
     if (!editable || !isDirty) return;
@@ -417,7 +457,10 @@ export function MarkdownSplitEditor({
         className="vault-website-editor-panes"
         data-mobile-view={reading ? "preview" : mobileView}
         style={{
-          flexDirection: mdSide === "left" ? "row" : "row-reverse",
+          // On a phone with papers, both columns can be on the page at
+          // once (the pile above the Markdown), so they stack, the
+          // Preview column and its pile first.
+          flexDirection: papersOverMarkdown ? "column-reverse" : mdSide === "left" ? "row" : "row-reverse",
           ...(reading && { flex: "1 1 auto", minHeight: 0, alignItems: "stretch" }),
         }}
       >
@@ -516,10 +559,14 @@ export function MarkdownSplitEditor({
           </div>
         </div>
 
-        <div className="vault-website-editor-preview" style={reading ? { display: "flex", flexDirection: "column" } : undefined}>
+        <div
+          className="vault-website-editor-preview"
+          style={reading ? { display: "flex", flexDirection: "column" } : papersOverMarkdown ? { display: "block", alignSelf: "stretch" } : undefined}
+        >
+          {!reading && previewPapers}
           <Surface
             className="vault-website-editor-preview-surface"
-            style={reading ? { flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" } : undefined}
+            style={reading ? { flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" } : papersOverMarkdown ? { display: "none" } : undefined}
           >
             <div className="vault-website-editor-pane-label" style={reading ? { display: "none" } : undefined}>
               <span>Preview</span>
