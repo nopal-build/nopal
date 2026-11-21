@@ -331,7 +331,7 @@ describe("starting a letter as a client", () => {
     const client = renderToStaticMarkup(<LetterBrief fileId="l1" initial={initial} hasPurpose={false} withBrief={false} openByDefault />);
     expect(client).toContain("data-letter-talk");
     expect(client).not.toMatch(/The brief|Write the brief|Say what it is for first/);
-    const guide = renderToStaticMarkup(<LetterBrief fileId="l1" initial={initial} hasPurpose={false} openByDefault />);
+    const guide = renderToStaticMarkup(<LetterBrief fileId="l1" initial={initial} hasPurpose={false} openByDefault startWith="brief" />);
     expect(guide).toContain("Write the brief");
     expect(app("components/LetterWriting.tsx")).toContain('withBrief={writer !== "client"}');
     expect(app("routes/newspaper.$folderId_.letter.$fileId.tsx")).toContain("writer: writing.writer");

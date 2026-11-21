@@ -30,7 +30,6 @@ import { Stack } from "stamps/Stack";
 import { button } from "stamps/button.css";
 import { link } from "stamps/link.css";
 import { hideInPrint } from "stamps/print.css";
-import { sprinkles } from "stamps/sprinkles.css";
 import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import { DictatedTextBox } from "./DictateButton";
@@ -51,15 +50,15 @@ function longDay(day: string): string {
   return new Date(`${day}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-const twirlStyle = { background: "transparent", border: "none", padding: 0, cursor: "pointer", color: "inherit" } as const;
-
 import { writeBackPath } from "./letterPaths";
 
 /** The one line under the letter's header. */
 export function ReflectionTwirl({ open, keptDate, onToggle }: { open: boolean; keptDate: string | null; onToggle: () => void }) {
   return (
     <p className={`${hideInPrint} ${textSize.sm}`} style={{ margin: 0 }} data-reflection-line>
-      <button type="button" className={sprinkles({ fontWeight: "semibold" })} onClick={onToggle} aria-expanded={open} style={twirlStyle} data-reflection-twirl>
+      {/* A button, not a line of text, and Stamps' green one (Austin,
+          2026-11-21): the reader should see there is something to press. */}
+      <button type="button" className={button({ variant: "secondary", size: "compact" })} onClick={onToggle} aria-expanded={open} data-reflection-twirl>
         {REFLECT_LABEL} {open ? "▾" : "▸"}
       </button>
       {keptDate && (

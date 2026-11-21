@@ -23,6 +23,16 @@
 // make of any of it. Code: the jobs and their state, the Card write at
 // Send, that the brief and outline are read-only here unless the writer
 // edits the outline (`OxRenderer`, no pen). The model: the words.
+//
+// How it is drawn (Austin, 2026-11-21: "more like a piece of paper that
+// can be taped in place or stacked on top of each other", "referencable
+// as you write a letter, not a long scrolling thing at the top you can't
+// get back to"): three papers in a `PaperPile` at the top of the editor's
+// Preview side, in view however far down the letter the writer is. The
+// Preview is what shows; one paper is up at a time, over it, so the
+// Markdown and the paper being written from sit side by side. The editor places the pile
+// (`MarkdownSplitEditor`'s `previewPapers`); this file says what is on
+// each paper and which is up.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LetterBriefForPage, LetterJobForPage } from "robustness-core/data/brief.server";
 import { splitFrontmatter } from "robustness-core/data/project.types";
@@ -37,6 +47,7 @@ import { textSize } from "stamps/typography.css";
 import { semanticColors } from "stamps/tokens";
 import OxRenderer from "./OxRenderer";
 import { DictatedTextBox } from "./DictateButton";
+import { PaperPile, type PaperSheet } from "./stamps-candidates/PaperPile";
 
 /** The sentence under the New letter form, and the confirms on the
  * controls that run the model: each is a run, and the click is the
@@ -129,13 +140,32 @@ function BriefReference({ markdown }: { markdown: string }) {
   );
 }
 
+/** The three papers of a letter's workings. */
+export type LetterPaper = "brief" | "talk" | "outline";
+
+/** Which paper is up when the page opens. None: the Preview is what a
+ * writer comes back to (Austin, 2026-11-21: "The preview should be the
+ * obvious default view"). The one exception is a letter that is still
+ * only its heading, where there is nothing to preview yet: the furthest
+ * the chain has got is up, the outline, else the brief (written, being
+ * written, or failed), else the talk box. Pure. */
+export function paperUpAtStart(initial: LetterBriefForPage, openByDefault: boolean, withBrief: boolean): LetterPaper | null {
+  if (!openByDefault) return null;
+  if (initial.outline || initial.outlineJob || initial.talk.sent) return "outline";
+  return withBrief && (initial.brief || initial.job) ? "brief" : "talk";
+}
+
 export function LetterBrief({
   fileId,
   initial,
   hasPurpose,
   openByDefault,
   withBrief = true,
+  startWith,
 }: {
+  /** The paper that is up to begin with, when the caller knows better
+   * than `paperUpAtStart`; null for none. */
+  startWith?: LetterPaper | null;
   fileId: string;
   initial: LetterBriefForPage;
   /** Without a purpose line there is nothing to brief from. */
@@ -144,28 +174,17 @@ export function LetterBrief({
    * (Austin, 2026-11-05), so the block is not drawn, not even greyed.
    * The talk box and the outline stay. */
   withBrief?: boolean;
-  /** Open while the letter is still only its heading: the brief is read
-   * before the letter is written. */
+  /** True while the letter is still only its heading: a paper is up
+   * then, because the brief is read before the letter is written. */
   openByDefault: boolean;
 }) {
   const [state, setState] = useState<LetterBriefForPage>(initial);
-  // The brief stays open until the outline exists; then the outline is
-  // what the guide keeps open while writing.
-  const [briefOpen, setBriefOpen] = useState(openByDefault && !initial.outline);
-  const briefHeading = useRef<HTMLDivElement>(null);
-  const foldBrief = () => {
-    setBriefOpen(false);
-    briefHeading.current?.scrollIntoView({ block: "start", behavior: "smooth" });
-  };
-  const [outlineOpen, setOutlineOpen] = useState(true);
+  // Which paper is up. One at a time, over the Preview.
+  const [up, setUp] = useState<LetterPaper | null>(() => (startWith !== undefined ? startWith : paperUpAtStart(initial, openByDefault, withBrief)));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [talk, setTalk] = useState(initial.talk.draft ?? "");
-  // Beside a brief the talk box is up, as it was. With no brief it is up
-  // while the letter is still to be written or a talk is half typed, and
-  // one line otherwise, so a finished letter doesn't carry an empty box.
-  const [talkOpen, setTalkOpen] = useState(!!initial.brief || openByDefault || !!initial.talk.draft);
   const hadBrief = useRef(!!initial.brief);
   const [talkSaved, setTalkSaved] = useState<"" | "Saving…" | "Saved">("");
   const [editing, setEditing] = useState(false);
@@ -209,21 +228,20 @@ export function LetterBrief({
     };
   }, [running, refresh]);
 
-  // A brief arriving brings the talk box up beside it.
+  // A brief arriving comes up, the talk box beside it.
   useEffect(() => {
     if (state.brief && !hadBrief.current) {
       hadBrief.current = true;
-      setTalkOpen(true);
+      setUp("brief");
     }
   }, [state.brief]);
 
-  // The outline arriving opens itself and folds the brief away.
+  // The outline arriving comes up in the brief's place.
   const hadOutline = useRef(!!initial.outline);
   useEffect(() => {
     if (state.outline && !hadOutline.current) {
       hadOutline.current = true;
-      setOutlineOpen(true);
-      setBriefOpen(false);
+      setUp("outline");
     }
   }, [state.outline]);
 
@@ -273,7 +291,7 @@ export function LetterBrief({
       title={hasPurpose ? undefined : "Say what this letter is for first"}
       onClick={() => {
         if (state.brief && !window.confirm(BRIEF_AGAIN_ASK)) return;
-        void post("brief").then((ok) => ok && setBriefOpen(true));
+        void post("brief").then((ok) => ok && setUp("brief"));
       }}
       data-brief-button
     >
@@ -281,15 +299,53 @@ export function LetterBrief({
     </button>
   );
 
-  return (
-    <section className={sprinkles({ display: "flex", flexDirection: "column", gap: 4, marginBottom: 6 })} aria-label={briefShown ? "The brief, the talk-through and the outline" : "The talk-through and the outline"} data-letter-brief data-brief-state={briefState} data-outline-state={outlineState} data-from-reflection={about ? "true" : undefined}>
-      {/* ── The brief ── */}
-      {briefShown && (
-      <>
-      <Cluster gap={3} align="center" ref={briefHeading}>
-        <button type="button" className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`} onClick={() => setBriefOpen((o) => !o)} aria-expanded={briefOpen} style={twirlStyle}>
-          The brief {briefOpen ? "▾" : "▸"}
+  const onUp = useCallback((key: string | null) => setUp(key as LetterPaper | null), []);
+
+  const messageLine = message && (
+    <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textDanger }} role="alert">
+      {message}
+    </p>
+  );
+
+  // ── The talk box ── on its own paper, and beside the brief while the
+  // brief is up (Austin, 2026-10-28: the space to talk should be there
+  // while reading the brief), pinned there so it stays in view as the
+  // brief scrolls under the tape. Only the paper that is up is drawn, so
+  // there is one box on the page at a time.
+  const talkBox = (pinned: boolean) => (
+    <Stack gap={2} data-letter-talk style={pinned ? { position: "sticky", top: 0 } : undefined}>
+      {/* Thinking out loud is the point here, so it can be dictated.
+          The letter itself never can (see DictateButton's header). */}
+      <DictatedTextBox target={{ letterFile: fileId }} value={talk} onChange={onTalkChange} name="talk" label="Talk it through" placeholder={state.brief ? TALK_PROMPT_WITH_BRIEF : TALK_PROMPT} />
+      <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
+        {TALK_HINT}
+        {talkSaved ? ` · ${talkSaved}` : ""}
+      </p>
+      <div>
+        <button
+          type="button"
+          className={button({ variant: "primary", size: "compact" })}
+          disabled={busy || running || !talk.trim()}
+          onClick={() => {
+            if (!window.confirm(OUTLINE_ASK)) return;
+            // The pending draft save is dropped: a late PUT would write
+            // the draft back over a row the send has already cleared.
+            if (talkTimer.current) clearTimeout(talkTimer.current);
+            void post("talk", { text: talk }).then((ok) => ok && setUp("outline"));
+          }}
+          data-outline-button
+        >
+          Write the outline
         </button>
+      </div>
+    </Stack>
+  );
+
+  // ── The brief ──
+  const briefBeside = !!state.brief && !state.talk.sent;
+  const briefPaper = (
+    <Stack gap={3} data-chain-brief>
+      <Cluster gap={3} align="center">
         {briefRunning && state.job && (
           <span className={textSize.sm} style={{ color: semanticColors.textSubtle }} data-brief-progress>
             {briefJobLine(state.job, now)}
@@ -312,193 +368,158 @@ export function LetterBrief({
           {hasPurpose ? "This letter has no brief yet." : "This letter has no brief yet. Say what it is for first."}
         </p>
       )}
-      </>
+      {messageLine}
+      {state.brief &&
+        (() => {
+          // Stamps' Grid: two columns when the paper is wide enough for
+          // both, one when it isn't. A Stack once the talk is given.
+          const Chain = briefBeside ? Grid : Stack;
+          return (
+            <Chain gap={briefBeside ? 6 : 4} {...(briefBeside ? { minColumnWidth: 280, style: { alignItems: "start" } } : {})} data-chain-layout={briefBeside ? "side-by-side" : "stacked"}>
+              <Stack gap={2}>
+                {state.brief.incomplete.length > 0 && (
+                  <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }} data-brief-incomplete>
+                    Not finished: {state.brief.incomplete.join("; ")}. Writing it again may finish it.
+                  </p>
+                )}
+                <div data-brief-body>
+                  <OxRenderer markdown={halves.first} className="ox-no-dots ox-no-heading-marks" />
+                </div>
+                {halves.reference && <BriefReference markdown={halves.reference} />}
+              </Stack>
+              {briefBeside && talkBox(true)}
+            </Chain>
+          );
+        })()}
+    </Stack>
+  );
+
+  // ── The talk-through ── the box until it is given, then the words.
+  const talkPaper = state.talk.sent ? (
+    <Stack gap={1} data-letter-talk-sent data-talk-on-record={state.talk.sent.onRecord ? "true" : "false"}>
+      <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
+        {state.talk.sent.onRecord ? `${state.talk.sent.byName}'s words, on the record ${longDate(`${state.talk.sent.onRecord}T12:00:00`)}` : `${state.talk.sent.byName}'s words. ${TALK_WAITS}`}
+      </span>
+      {about && (
+        <span className={textSize.xs} style={{ color: semanticColors.textSubtle }} data-talk-about>
+          {talkAboutLine(about)}
+        </span>
       )}
-      {message && (
-        <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textDanger }} role="alert">
-          {message}
+      <p className={textSize.sm} style={{ margin: 0, whiteSpace: "pre-wrap" }}>
+        {state.talk.sent.text}
+      </p>
+    </Stack>
+  ) : (
+    <Stack gap={2}>
+      {messageLine}
+      {talkBox(false)}
+    </Stack>
+  );
+
+  // ── The outline ──
+  const outlinePaper = (
+    <Stack gap={3} data-letter-outline>
+      <Cluster gap={3} align="center">
+        {outlineRunning && state.outlineJob && (
+          <span className={textSize.sm} style={{ color: semanticColors.textSubtle }} data-outline-progress>
+            {briefJobLine(state.outlineJob, now, "the outline")}
+          </span>
+        )}
+        {!outlineRunning && state.outline && (
+          <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
+            Written {longDate(state.outline.writtenAt)} by {state.outline.byName}
+            {state.outline.editedAt ? `, edited ${longDate(state.outline.editedAt)}` : ""}
+          </span>
+        )}
+        {!outlineRunning && state.outline && !editing && (
+          <button
+            type="button"
+            className={`${link} ${textSize.xs}`}
+            disabled={busy}
+            onClick={() => {
+              setOutlineDraft(state.outline?.content ?? "");
+              setEditing(true);
+            }}
+            data-outline-edit
+          >
+            Edit
+          </button>
+        )}
+        {!outlineRunning && state.talk.sent && (
+          <button
+            type="button"
+            className={button({ variant: "secondary", size: "compact" })}
+            disabled={busy || running}
+            onClick={() => {
+              if (!window.confirm(state.outline ? OUTLINE_AGAIN_ASK : OUTLINE_FIRST_ASK)) return;
+              void post("outline");
+            }}
+            data-outline-again
+          >
+            {state.outline ? "Write it again" : "Write the outline"}
+          </button>
+        )}
+      </Cluster>
+      {outlineFailed && !outlineRunning && (
+        <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textDanger }} role="alert" data-outline-error>
+          The outline didn't get written: {outlineFailed}
         </p>
       )}
-      {/* The brief and the talk-through side by side while both are up
-          (Austin, 2026-10-28: the space to talk should be there while
-          reading the brief): Stamps' Grid, two columns when the page is
-          wide enough for both, one when it isn't; the talk pinned so it
-          stays in view as the brief scrolls. A Stack once the talk is on
-          the record. */}
-      {(() => {
-        const sideBySide = !!(briefOpen && state.brief && !state.talk.sent && talkOpen);
-        const Chain = sideBySide ? Grid : Stack;
-        // Nothing to hold once the talk is given and the brief is folded
-        // or absent: no empty row between the brief's line and the talk.
-        if (!(briefOpen && state.brief) && state.talk.sent) return null;
-        return (
-      <Chain gap={sideBySide ? 6 : 4} {...(sideBySide ? { minColumnWidth: 320, style: { alignItems: "start" } } : {})} data-chain-layout={sideBySide ? "side-by-side" : "stacked"}>
-      {briefOpen && state.brief && (
-        <Stack gap={2} data-chain-brief>
-          {state.brief.incomplete.length > 0 && (
-            <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }} data-brief-incomplete>
-              Not finished: {state.brief.incomplete.join("; ")}. Writing it again may finish it.
+      {messageLine}
+      {state.outline && !editing && (
+        <Stack gap={2}>
+          {state.outline.incomplete.length > 0 && (
+            <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }} data-outline-incomplete>
+              Not finished: {state.outline.incomplete.join("; ")}. Writing it again may finish it.
             </p>
           )}
-          <div data-brief-body>
-            <OxRenderer markdown={halves.first} className="ox-no-dots ox-no-heading-marks" />
-          </div>
-          {halves.reference && <BriefReference markdown={halves.reference} />}
-          {/* Folds from the bottom too, so a long brief doesn't have to be
-              scrolled back up to close (Austin, 2026-10-28). */}
-          <div>
-            <button type="button" className={textSize.xs} style={{ ...twirlStyle, color: semanticColors.textSubtle }} onClick={foldBrief} data-brief-fold>
-              Fold the brief ▴
-            </button>
+          <div data-outline-body>
+            <OxRenderer markdown={state.outline.content} className="ox-no-dots ox-no-heading-marks" />
           </div>
         </Stack>
       )}
-
-      {/* ── The talk-through ── */}
-      {!state.talk.sent && (
-        <Stack gap={2} data-letter-talk data-talk-open={talkOpen ? "true" : "false"} style={sideBySide ? { position: "sticky", top: 12 } : undefined}>
-          <div>
-            <button type="button" className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`} onClick={() => setTalkOpen((o) => !o)} aria-expanded={talkOpen} style={twirlStyle} data-talk-twirl>
-              Talk it through {talkOpen ? "▾" : "▸"}
-            </button>
-          </div>
-          {talkOpen && (
-            <>
-          {/* Thinking out loud is the point here, so it can be dictated.
-              The letter itself never can (see DictateButton's header). */}
-          <DictatedTextBox target={{ letterFile: fileId }} value={talk} onChange={onTalkChange} name="talk" label="Talk it through" placeholder={state.brief ? TALK_PROMPT_WITH_BRIEF : TALK_PROMPT} />
-          <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }}>
-            {TALK_HINT}
-            {talkSaved ? ` · ${talkSaved}` : ""}
-          </p>
-          <div>
+      {editing && (
+        <Stack gap={2} data-outline-editing>
+          <Input type="textarea" name="outline" label="The outline, in your hands" value={outlineDraft} onChange={(e) => setOutlineDraft(e.target.value)} />
+          <Cluster gap={3} align="center">
             <button
               type="button"
               className={button({ variant: "primary", size: "compact" })}
-              disabled={busy || running || !talk.trim()}
-              onClick={() => {
-                if (!window.confirm(OUTLINE_ASK)) return;
-                // The pending draft save is dropped: a late PUT would write
-                // the draft back over a row the send has already cleared.
-                if (talkTimer.current) clearTimeout(talkTimer.current);
-                void post("talk", { text: talk });
-              }}
-              data-outline-button
+              disabled={busy || !outlineDraft.trim()}
+              onClick={() => void post("outline", { content: outlineDraft }, "PUT").then((ok) => ok && setEditing(false))}
             >
-              Write the outline
+              Save
             </button>
-          </div>
-            </>
-          )}
-        </Stack>
-      )}
-      </Chain>
-        );
-      })()}
-      {state.talk.sent && (
-        <Stack gap={1} data-letter-talk-sent data-talk-on-record={state.talk.sent.onRecord ? "true" : "false"}>
-          <span className={`${textSize.sm} ${sprinkles({ fontWeight: "semibold" })}`}>
-            Talked through{" "}
-            <span className={textSize.xs} style={{ color: semanticColors.textSubtle, fontWeight: "normal" }}>
-              · {state.talk.sent.onRecord ? `on the record ${longDate(`${state.talk.sent.onRecord}T12:00:00`)}, ${state.talk.sent.byName}'s words` : `${state.talk.sent.byName}'s words. ${TALK_WAITS}`}
-            </span>
-          </span>
-          {about && (
-            <span className={textSize.xs} style={{ color: semanticColors.textSubtle }} data-talk-about>
-              {talkAboutLine(about)}
-            </span>
-          )}
-          <p className={textSize.sm} style={{ margin: 0, whiteSpace: "pre-wrap" }}>
-            {state.talk.sent.text}
-          </p>
-        </Stack>
-      )}
-
-      {/* ── The outline ── */}
-      {(state.talk.sent || state.outline || outlineRunning || outlineFailed) && (
-        <Stack gap={2} data-letter-outline>
-          <Cluster gap={3} align="center">
-            <button type="button" className={`${textSize.base} ${sprinkles({ fontWeight: "semibold" })}`} onClick={() => setOutlineOpen((o) => !o)} aria-expanded={outlineOpen} style={twirlStyle}>
-              The outline {outlineOpen ? "▾" : "▸"}
+            <button type="button" className={`${link} ${textSize.sm}`} disabled={busy} onClick={() => setEditing(false)}>
+              Cancel
             </button>
-            {outlineRunning && state.outlineJob && (
-              <span className={textSize.sm} style={{ color: semanticColors.textSubtle }} data-outline-progress>
-                {briefJobLine(state.outlineJob, now, "the outline")}
-              </span>
-            )}
-            {!outlineRunning && state.outline && (
-              <span className={textSize.xs} style={{ color: semanticColors.textSubtle }}>
-                Written {longDate(state.outline.writtenAt)} by {state.outline.byName}
-                {state.outline.editedAt ? `, edited ${longDate(state.outline.editedAt)}` : ""}
-              </span>
-            )}
-            {!outlineRunning && state.outline && !editing && (
-              <button
-                type="button"
-                className={`${link} ${textSize.xs}`}
-                disabled={busy}
-                onClick={() => {
-                  setOutlineDraft(state.outline?.content ?? "");
-                  setEditing(true);
-                  setOutlineOpen(true);
-                }}
-                data-outline-edit
-              >
-                Edit
-              </button>
-            )}
-            {!outlineRunning && state.talk.sent && (
-              <button
-                type="button"
-                className={button({ variant: "secondary", size: "compact" })}
-                disabled={busy || running}
-                onClick={() => {
-                  if (!window.confirm(state.outline ? OUTLINE_AGAIN_ASK : OUTLINE_FIRST_ASK)) return;
-                  void post("outline").then((ok) => ok && setOutlineOpen(true));
-                }}
-                data-outline-again
-              >
-                {state.outline ? "Write it again" : "Write the outline"}
-              </button>
-            )}
           </Cluster>
-          {outlineFailed && !outlineRunning && (
-            <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textDanger }} role="alert" data-outline-error>
-              The outline didn't get written: {outlineFailed}
-            </p>
-          )}
-          {outlineOpen && state.outline && !editing && (
-            <Stack gap={2}>
-              {state.outline.incomplete.length > 0 && (
-                <p className={textSize.xs} style={{ margin: 0, color: semanticColors.textSubtle }} data-outline-incomplete>
-                  Not finished: {state.outline.incomplete.join("; ")}. Writing it again may finish it.
-                </p>
-              )}
-              <div data-outline-body>
-                <OxRenderer markdown={state.outline.content} className="ox-no-dots ox-no-heading-marks" />
-              </div>
-            </Stack>
-          )}
-          {editing && (
-            <Stack gap={2} data-outline-editing>
-              <Input type="textarea" name="outline" label="The outline, in your hands" value={outlineDraft} onChange={(e) => setOutlineDraft(e.target.value)} />
-              <Cluster gap={3} align="center">
-                <button
-                  type="button"
-                  className={button({ variant: "primary", size: "compact" })}
-                  disabled={busy || !outlineDraft.trim()}
-                  onClick={() => void post("outline", { content: outlineDraft }, "PUT").then((ok) => ok && setEditing(false))}
-                >
-                  Save
-                </button>
-                <button type="button" className={`${link} ${textSize.sm}`} disabled={busy} onClick={() => setEditing(false)}>
-                  Cancel
-                </button>
-              </Cluster>
-            </Stack>
-          )}
         </Stack>
       )}
-    </section>
+    </Stack>
+  );
+
+  // The papers, in the order the chain runs. The outline's is there once
+  // there is a talk to write it from.
+  const hasOutlinePaper = !!(state.talk.sent || state.outline || outlineRunning || outlineFailed);
+  const sheets: PaperSheet[] = [
+    ...(briefShown ? [{ key: "brief", label: "The brief", status: briefRunning ? "writing…" : briefFailed ? "didn't get written" : undefined, content: briefPaper }] : []),
+    // A talk half typed says so on its slip, since the slip may be all that shows.
+    { key: "talk", label: state.talk.sent ? "Talked through" : "Talk it through", status: !state.talk.sent && talk.trim() ? "started" : undefined, content: talkPaper },
+    ...(hasOutlinePaper ? [{ key: "outline", label: "The outline", status: outlineRunning ? "writing…" : outlineFailed ? "didn't get written" : undefined, content: outlinePaper }] : []),
+  ];
+
+  return (
+    <PaperPile
+      under="Preview"
+      sheets={sheets}
+      up={up}
+      onUp={onUp}
+      aria-label={briefShown ? "The brief, the talk-through and the outline" : "The talk-through and the outline"}
+      data-letter-brief
+      data-brief-state={briefState}
+      data-outline-state={outlineState}
+      data-from-reflection={about ? "true" : undefined}
+    />
   );
 }

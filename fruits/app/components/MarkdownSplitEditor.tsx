@@ -86,7 +86,16 @@ export function MarkdownSplitEditor({
   autosave = false,
   showLength = false,
   toolbarTools,
+  previewPapers,
 }: {
+  /** Papers kept at the top of the Preview side, to look at while
+   * writing: a `PaperPile` (or anything that sticks to the top of its
+   * column and lays itself over what is under it). `LetterSplitEditor`'s
+   * brief, talk-through and outline. Rendered first in the Preview
+   * column with no wrapper, so it sticks for the whole length of the
+   * page; on a phone it stays above whichever pane is showing; put away
+   * while reading. */
+  previewPapers?: ReactNode;
   fileId: string;
   initialContent: string;
   editable: boolean;
@@ -266,6 +275,10 @@ export function MarkdownSplitEditor({
   const [reading, setReading] = useState(false);
 
   const isMobile = useIsMobileWebsiteEditor();
+  // A phone showing the Markdown pane, with papers to keep in reach: the
+  // stylesheet hides the whole Preview column then, pile and all, so the
+  // column is shown and only its Preview surface hidden (inline, below).
+  const papersOverMarkdown = !!previewPapers && isMobile && mobileView === "markdown" && !reading;
   const markdownPaneRef = useRef<HTMLDivElement | null>(null);
   // A real `height` (below), not a `max-height` -- the pane should always
   // FILL the available space (per this feature's own "go full height"
@@ -444,7 +457,10 @@ export function MarkdownSplitEditor({
         className="vault-website-editor-panes"
         data-mobile-view={reading ? "preview" : mobileView}
         style={{
-          flexDirection: mdSide === "left" ? "row" : "row-reverse",
+          // On a phone with papers, both columns can be on the page at
+          // once (the pile above the Markdown), so they stack, the
+          // Preview column and its pile first.
+          flexDirection: papersOverMarkdown ? "column-reverse" : mdSide === "left" ? "row" : "row-reverse",
           ...(reading && { flex: "1 1 auto", minHeight: 0, alignItems: "stretch" }),
         }}
       >
@@ -543,10 +559,14 @@ export function MarkdownSplitEditor({
           </div>
         </div>
 
-        <div className="vault-website-editor-preview" style={reading ? { display: "flex", flexDirection: "column" } : undefined}>
+        <div
+          className="vault-website-editor-preview"
+          style={reading ? { display: "flex", flexDirection: "column" } : papersOverMarkdown ? { display: "block", alignSelf: "stretch" } : undefined}
+        >
+          {!reading && previewPapers}
           <Surface
             className="vault-website-editor-preview-surface"
-            style={reading ? { flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" } : undefined}
+            style={reading ? { flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" } : papersOverMarkdown ? { display: "none" } : undefined}
           >
             <div className="vault-website-editor-pane-label" style={reading ? { display: "none" } : undefined}>
               <span>Preview</span>

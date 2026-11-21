@@ -88,9 +88,13 @@ export function LetterWriting({
 
   return (
     <>
-      {brief && <LetterBrief key={`brief-${file._id}`} fileId={file._id} initial={brief} hasPurpose={!!file.purpose?.trim()} withBrief={writer !== "client"} openByDefault={isLetterOnlyItsHeading(file.content ?? "")} />}
+      {/* The workings are papers at the top of the editor's Preview side
+          (`PaperPile`), so they are inside the editor now and start
+          afresh with it when its key changes. Nothing typed is lost to
+          that: a talk draft is kept as it is typed. */}
       <LetterSplitEditor
         key={loadedKey}
+        papers={brief && <LetterBrief key={`brief-${file._id}`} fileId={file._id} initial={brief} hasPurpose={!!file.purpose?.trim()} withBrief={writer !== "client"} openByDefault={isLetterOnlyItsHeading(file.content ?? "")} />}
         fileId={file._id}
         folderId={file.folder_id ?? null}
         projectFolderId={projectFolderId}
