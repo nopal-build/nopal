@@ -1003,6 +1003,14 @@ function renderGalleryGrid(
   annotations?: AnnotationCtx,
 ): ReactNode {
   const columns = computeGalleryColumns(images.length, maxColumnsAttr);
+  // One video on its own keeps its own shape (Austin, 2026-11-21, of a
+  // letter's "Read it to them" recording, which is exactly this: "always
+  // square but most recordings are not square"). The square cell is
+  // there to keep a grid of several even (`oxmarkdown.css`,
+  // `.ox-gallery-item video`); with one item there is no grid to keep,
+  // and the square only letterboxed the recording. Capped to the window's
+  // height so an upright phone recording doesn't run off the screen.
+  const loneVideo = images.length === 1 && images[0].kind === "video";
   const grid = (
     <div
       className="ox-gallery-directive"
@@ -1023,6 +1031,7 @@ function renderGalleryGrid(
                 title={img.title ?? undefined}
                 controls
                 preload="metadata"
+                style={loneVideo ? { aspectRatio: "auto", height: "auto", maxHeight: "85vh" } : undefined}
               />
             ) : (
               <GalleryPhoto src={renditionUrl(img.url, "display")} alt={img.alt ?? ""} title={img.title ?? undefined} />

@@ -38,7 +38,10 @@ export function LetterSplitEditor({
   purpose,
   recordable = false,
   papers,
+  expandable,
 }: {
+  /** See `MarkdownSplitEditor`'s `expandable`. */
+  expandable?: boolean;
   /** The letter's workings (`LetterBrief`), kept at the top of the
    * Preview side while writing. */
   papers?: ReactNode;
@@ -129,6 +132,7 @@ export function LetterSplitEditor({
       headerLeft={headerWithPurpose}
       toolbarRight={toolbarRight}
       previewPapers={papers}
+      expandable={expandable}
       onInsertFiles={insertPictures}
       spellCheck
       autosave

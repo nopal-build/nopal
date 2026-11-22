@@ -88,7 +88,15 @@ export function MarkdownSplitEditor({
   showLength = false,
   toolbarTools,
   previewPapers,
+  expandable = true,
 }: {
+  /** The button that takes the editor over the whole window. On by
+   * default, for an editor that sits in a narrower page with things
+   * beside it (the Vault and its file tree). A page that already gives
+   * the editor the whole window turns it off (the letter desk; Austin,
+   * 2026-11-21: "the best of both modes in one default and removes a
+   * control option"). */
+  expandable?: boolean;
   /** Papers kept at the top of the Preview side, to look at while
    * writing: a `PaperPile` (or anything that sticks to the top of its
    * column and lays itself over what is under it). `LetterSplitEditor`'s
@@ -310,12 +318,11 @@ export function MarkdownSplitEditor({
   }, [isMobile, mobileView, body]);
 
   // Desktop: the Markdown and the Preview are kept in step
-  // (`sourceScrollLink.ts`): the Markdown glides to match once a scroll of
-  // the page settles, and the block the cursor is in is marked in the
-  // Preview and brought into view. Exact where the preview marks its
+  // (`sourceScrollLink.ts`): the Markdown scrolls with the page, and the
+  // block the cursor is in is marked in the Preview and brought into view. Exact where the preview marks its
   // blocks with their source lines (a letter's does); by fraction of
   // length where it doesn't.
-  const sourceMark = useSourceScrollLink({ textareaRef, previewRef: previewBodyRef, body, enabled: !isMobile && !reading });
+  const sourceMark = useSourceScrollLink({ textareaRef, previewRef: previewBodyRef, body, enabled: !isMobile && !reading, layoutKey: expanded });
 
   const handleSave = useCallback(() => {
     if (!editable || !isDirty) return;
@@ -338,7 +345,7 @@ export function MarkdownSplitEditor({
     return () => clearTimeout(timer);
   }, [autosave, editable, isDirty, isSaving, body, handleSave]);
 
-  const expandButton = (
+  const expandButton = !expandable ? null : (
     <ActionBarButton
       onClick={() => setExpanded((v) => !v)}
       aria-label={expanded ? "Exit fullscreen" : "Expand"}

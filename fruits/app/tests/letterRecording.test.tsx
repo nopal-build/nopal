@@ -86,6 +86,16 @@ describe("the first block", () => {
     expect(client).toContain("Air seal the ceiling plane first.");
   });
 
+  it("keeps the recording's own shape: one video on its own is not squared, a grid of several still is (2026-11-21)", () => {
+    const one = renderToStaticMarkup(<OxRenderer markdown={recordingBlock("rec1") + "\n\n# Attic\n"} servedFileIds={{}} />);
+    expect(one).toMatch(/<video[^>]*style="aspect-ratio:auto;height:auto;max-height:85vh"/);
+    const two = renderToStaticMarkup(<OxRenderer markdown={":::gallery\n[a](/api/vault/view/v1?type=video)\n[b](/api/vault/view/v2?type=video)\n:::\n"} servedFileIds={{}} />);
+    expect(two).toContain("<video");
+    expect(two).not.toContain("aspect-ratio");
+    const photo = renderToStaticMarkup(<OxRenderer markdown={":::gallery\n![a](/api/vault/view/p1)\n:::\n"} servedFileIds={{}} />);
+    expect(photo).not.toContain("aspect-ratio");
+  });
+
   it("doesn't make the page repeat the title: the letter's heading still counts as its first words", () => {
     const body = setLeadingRecording(LETTER, "rec1");
     expect(bodyOpensWithTitle(body)).toBe(true);
