@@ -1,8 +1,7 @@
 // app/components/sourceScrollLink.ts
-// How a split editor lines its Markdown up with what is drawn beside it
-// (Austin, 2026-11-21, after a day with the first version: matching by
-// fraction of length "gets increasingly off with more images, the
-// parallax while scrolling is also somewhat disorienting").
+// How a split editor keeps its Markdown in step with what is drawn beside
+// it (Austin, 2026-11-21, after a day with the first version: matching
+// by fraction of length "gets increasingly off with more images").
 //
 // Three things, the way editors with a source pane and a preview pane do
 // it (VS Code's `data-line`, Joplin's `source-line` and scroll map):
@@ -16,24 +15,49 @@
 //    down the page. With no anchors (an editor whose preview doesn't
 //    mark its blocks) the map is its two ends, which is the old
 //    fraction-of-length match.
-// 2. The Markdown holds still while the page scrolls, and glides to the
-//    matching place once the scroll settles. Two columns moving at two
-//    speeds was the parallax.
-// 3. The cursor is the main link. Clicking or typing in the Markdown
-//    marks the block being edited in the Preview, and brings it level
-//    with the cursor's line when it is out of view. The Markdown is not
-//    moved by that: the hands are on it.
+// 2. The two scroll together, whichever one is being scrolled: the page
+//    moves the Markdown, and the Markdown moves the page. (For one merge
+//    the Markdown held still and glided into place once the page
+//    settled; in use the two moving together "overall feels more
+//    natural".)
+// 3. Putting the cursor in the Markdown jumps the page to that spot: the
+//    block being edited is marked in the Preview and brought level with
+//    the cursor's line when it is out of view. The Markdown is not moved
+//    by that: the hands are on it.
+//
+// What the map is between. One side is the Markdown's own scroll offset.
+// The other is THE PAGE'S scroll offset, not a place in the Preview: an
+// anchor's place on that side is how far the page has to be scrolled for
+// its block to sit level with the top of the Markdown box once that box
+// is pinned. So the top of the page is the top of the Markdown and the
+// bottom is the bottom, both ends are reached together, and everything
+// between is one unbroken line. Two earlier versions lined the Markdown
+// up against where its box happened to be on screen. That box moves (it
+// starts under the header and pins partway down, growing as it goes), so
+// the match moved with it: the Markdown slid backwards while the page
+// went forwards, and a Markdown that fit the pinned box but not the
+// short one was clamped to its top, which read as "go to the top of the
+// page" (Austin: "a strange freak out where the preview jumps back to
+// the top").
+//
+// Each side ignores a scroll it didn't get from a hand. The page ignores
+// the scroll the Markdown just gave it. The Markdown only counts as
+// scrolled by hand when a wheel, a touch, a key or a pressed pointer was
+// just on it: the browser also scrolls it by itself, when its box
+// changes size, and passing that on to the page was the freak out's
+// other half.
 //
 // The Markdown is a plain textarea, which cannot say where a wrapped
-// line sits, so the source side is measured on a hidden copy of the text
-// laid out with the textarea's own font and width, one element per line
-// (the markdown-it demo's way).
+// line sits, so that side is measured on a hidden copy of the text laid
+// out with the textarea's own font and width, one element per line (the
+// markdown-it demo's way).
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { findScrollingAncestor } from "stamps/useStickyPaneMaxHeight";
 
-/** One place known on both sides: a source line, the textarea scroll
- * offset that puts that line at the top, and how far down the drawn page
- * its block starts. */
+/** One place known on both sides: a source line, the Markdown scroll
+ * offset that puts that line at the top, and the matching offset on the
+ * drawn side (in the editor, the page's scroll offset that puts the
+ * line's block level with it). */
 export type ScrollAnchor = { line: number; source: number; drawn: number };
 
 /** The anchors in order with both ends added. An anchor that goes
@@ -88,7 +112,14 @@ export function anchorLineFor(lines: number[], line: number): number | null {
 /** Where the block being edited sits in the Preview, from its top. */
 export type SourceMark = { top: number; height: number };
 
+/** How long after the last scroll event a scroll of ours counts as over. */
 const SETTLE_MS = 140;
+/** How long after a wheel, touch or key on the Markdown its scrolling
+ * still counts as by hand (the browser eases a wheel's scroll out). */
+const HAND_MS = 500;
+/** The least scroll travel a pinned Markdown needs before scrolling it
+ * moves the page. */
+const MIN_TRAVEL = 240;
 /** Room kept clear at the top of the window for whatever is pinned there. */
 const TOP_CLEAR = 64;
 const BOTTOM_CLEAR = 24;
@@ -101,11 +132,16 @@ export function useSourceScrollLink({
   previewRef,
   body,
   enabled,
+  layoutKey,
 }: {
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   previewRef: RefObject<HTMLElement | null>;
   body: string;
   enabled: boolean;
+  /** Changes when what scrolls the preview changes (the editor taking
+   * over the window makes itself the scroller), so the wiring is redone
+   * against the new one. */
+  layoutKey?: unknown;
 }): SourceMark | null {
   const [mark, setMark] = useState<SourceMark | null>(null);
   // What the wiring below does when the text changes.
@@ -128,10 +164,6 @@ export function useSourceScrollLink({
     mirror.setAttribute("aria-hidden", "true");
     Object.assign(mirror.style, { position: "absolute", top: "0", left: "0", visibility: "hidden", pointerEvents: "none", whiteSpace: "pre-wrap", overflowWrap: "break-word", boxSizing: "border-box", zIndex: "-1" });
     host.appendChild(mirror);
-    // Scrolling the Markdown to its end doesn't carry on into the page:
-    // that page scroll would settle and pull the Markdown back.
-    const chained = textarea.style.overscrollBehavior;
-    textarea.style.overscrollBehavior = "contain";
     let mirrored: string | null = null;
     let mirroredWidth = 0;
     function layMirror() {
@@ -158,41 +190,113 @@ export function useSourceScrollLink({
       return row ? row.offsetTop - padTop() : null;
     }
 
+    // How far below its pane's top edge the textarea starts: where the
+    // Markdown's first line sits once the pane is pinned to the top.
+    const pane = host;
     let map: ScrollAnchor[] | null = null;
     function scrollMap(): ScrollAnchor[] {
       if (map) return map;
       layMirror();
-      const top = preview!.getBoundingClientRect().top;
+      const inset = textarea!.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+      // An element's place in what the page scrolls, less the inset: the
+      // page offset that puts it level with the pinned Markdown's top.
+      const base = scroller!.scrollTop - scroller!.getBoundingClientRect().top - inset;
       const anchors: ScrollAnchor[] = [];
       for (const el of preview!.querySelectorAll<HTMLElement>("[data-source-line]")) {
         const line = Number(el.dataset.sourceLine);
         const source = sourceTop(line);
-        if (source != null) anchors.push({ line, source, drawn: el.getBoundingClientRect().top - top });
+        const drawn = base + el.getBoundingClientRect().top;
+        // Nothing in the first windowful is an anchor. The page has a
+        // header above the editor that the Markdown has no lines for, and
+        // an exact match right under it would spend that whole header on
+        // the Markdown's first few lines (a touch on the Markdown, a
+        // lurch of the page). Left out, the header is spread over the
+        // first windowful, and the match is exact from there down.
+        if (source != null && drawn >= scroller!.clientHeight) anchors.push({ line, source, drawn });
       }
-      map = buildScrollMap(anchors, Math.max(0, textarea!.scrollHeight - textarea!.clientHeight), preview!.getBoundingClientRect().height);
+      map = buildScrollMap(anchors, pinnedRoom(), Math.max(0, scroller!.scrollHeight - scroller!.clientHeight));
       return map;
     }
+    /** How far the Markdown can scroll once its pane is pinned and at its
+     * full height. Not how far it can scroll right now: at the top of the
+     * page the pane is shorter, so the Markdown has more travel there,
+     * and a map built on that would stretch and shrink as the pane grew
+     * (the Markdown sliding backwards while the page went forwards). */
+    function pinnedRoom(): number {
+      const cs = getComputedStyle(scroller!);
+      const full = scroller!.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+      const grows = Math.max(0, full - pane.offsetHeight);
+      return Math.max(0, textarea!.scrollHeight - (textarea!.clientHeight + grows));
+    }
 
-    // ── The page scrolled: once it settles, the Markdown glides so the
-    // line at its top edge is the one level with it in the Preview. ──
-    let settle: ReturnType<typeof setTimeout> | null = null;
-    // Set while the page is being scrolled by the cursor link below, so
-    // that scroll doesn't move the Markdown out from under the cursor.
+    // ── The page scrolled: the Markdown goes with it. ──
+    let following = 0;
+    // Where `follow` last put the Markdown, so its own scroll event isn't
+    // read as someone scrolling it.
+    let given: number | null = null;
+    // Set while the page is being scrolled by us (the Markdown driving
+    // it, or the cursor link below), so that scroll isn't passed back.
     let ours = false;
     let oursDone: ReturnType<typeof setTimeout> | null = null;
+    function pageIsOurs(ms = SETTLE_MS) {
+      ours = true;
+      if (oursDone) clearTimeout(oursDone);
+      oursDone = setTimeout(() => (ours = false), ms);
+    }
     function follow() {
-      const level = textarea!.getBoundingClientRect().top - preview!.getBoundingClientRect().top;
-      const target = level <= 0 ? 0 : convertPosition(scrollMap(), level, "drawn");
-      textarea!.scrollTo({ top: Math.round(target), behavior: calm ? "auto" : "smooth" });
+      // Not while a hand is on the Markdown: the page can be scrolled by
+      // the wheel carrying on past the Markdown's end, and that must not
+      // pull the Markdown back.
+      if (pressed || performance.now() - wheelAt < HAND_MS) return;
+      textarea!.scrollTop = Math.round(convertPosition(scrollMap(), scroller!.scrollTop, "drawn"));
+      // What the browser made of it (it clamps).
+      given = textarea!.scrollTop;
     }
     function onScroll() {
       if (ours) {
-        if (oursDone) clearTimeout(oursDone);
-        oursDone = setTimeout(() => (ours = false), SETTLE_MS);
+        pageIsOurs();
         return;
       }
-      if (settle) clearTimeout(settle);
-      settle = setTimeout(follow, SETTLE_MS);
+      cancelAnimationFrame(following);
+      following = requestAnimationFrame(follow);
+    }
+
+    // ── The Markdown was scrolled by hand: the page goes with it. ──
+    let handAt = -Infinity;
+    // The wheel or a finger in particular: what can carry on into the page.
+    let wheelAt = -Infinity;
+    let pressed = false;
+    const hand = (e?: Event) => {
+      handAt = performance.now();
+      if (e && (e.type === "wheel" || e.type.startsWith("touch"))) wheelAt = handAt;
+    };
+    const press = () => {
+      pressed = true;
+      hand();
+    };
+    // Declared before `follow` runs, though after it is written: it only
+    // runs from a scroll event.
+    const release = () => {
+      if (pressed) hand();
+      pressed = false;
+    };
+    function onSourceScroll() {
+      const byHand = pressed || performance.now() - handAt < HAND_MS;
+      if (!byHand || (given !== null && Math.abs(textarea!.scrollTop - given) <= 1)) {
+        given = textarea!.scrollTop;
+        return;
+      }
+      given = null;
+      // A Markdown that all but fits its box has almost no travel to
+      // spend on a whole page: a notch of the wheel would throw the page
+      // most of its length. It is all in view anyway, so it is left to
+      // scroll by itself, and the cursor is the link.
+      if (pinnedRoom() < MIN_TRAVEL) return;
+      cancelAnimationFrame(following);
+      const to = Math.round(convertPosition(scrollMap(), textarea!.scrollTop, "source"));
+      if (to === Math.round(scroller!.scrollTop)) return;
+      pageIsOurs();
+      scroller!.scrollTop = to;
     }
 
     // ── The cursor moved in the Markdown: mark its block in the Preview,
@@ -234,10 +338,8 @@ export function useSourceScrollLink({
       const caret = sourceTop(line);
       const caretLevel = textarea!.getBoundingClientRect().top + padTop() + (caret ?? 0) - textarea!.scrollTop;
       const level = Math.min(Math.max(caretLevel, visibleTop), visibleBottom - 120);
-      ours = true;
-      if (oursDone) clearTimeout(oursDone);
-      oursDone = setTimeout(() => (ours = false), SETTLE_MS * 3);
-      if (settle) clearTimeout(settle);
+      pageIsOurs(SETTLE_MS * 3);
+      cancelAnimationFrame(following);
       scroller!.scrollBy({ top: Math.round(rect.top - level), behavior: calm ? "auto" : "smooth" });
     }
     function onCursor() {
@@ -258,6 +360,7 @@ export function useSourceScrollLink({
     });
     resized.observe(preview);
     resized.observe(textarea);
+    resized.observe(scroller);
     // Typing changes the text without always changing the drawn size (a
     // letter swapped for another), so it says so itself.
     textChanged.current = () => {
@@ -267,23 +370,31 @@ export function useSourceScrollLink({
     };
 
     scroller.addEventListener("scroll", onScroll, { passive: true });
+    textarea.addEventListener("scroll", onSourceScroll, { passive: true });
+    const hands = ["wheel", "touchstart", "touchmove", "keydown", "input"] as const;
+    for (const type of hands) textarea.addEventListener(type, hand, { passive: true });
+    textarea.addEventListener("pointerdown", press, { passive: true });
+    window.addEventListener("pointerup", release, { passive: true });
     document.addEventListener("selectionchange", onSelection);
     textarea.addEventListener("focus", onCursor);
     textarea.addEventListener("blur", onBlur);
     return () => {
       scroller.removeEventListener("scroll", onScroll);
+      textarea.removeEventListener("scroll", onSourceScroll);
+      for (const type of hands) textarea.removeEventListener(type, hand);
+      textarea.removeEventListener("pointerdown", press);
+      window.removeEventListener("pointerup", release);
       document.removeEventListener("selectionchange", onSelection);
       textarea.removeEventListener("focus", onCursor);
       textarea.removeEventListener("blur", onBlur);
       resized.disconnect();
       cancelAnimationFrame(frame);
-      if (settle) clearTimeout(settle);
+      cancelAnimationFrame(following);
       if (oursDone) clearTimeout(oursDone);
       mirror.remove();
-      textarea.style.overscrollBehavior = chained;
       textChanged.current = null;
     };
-  }, [enabled, textareaRef, previewRef]);
+  }, [enabled, layoutKey, textareaRef, previewRef]);
 
   useEffect(() => {
     textChanged.current?.();

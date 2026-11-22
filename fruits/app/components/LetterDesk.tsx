@@ -95,7 +95,13 @@ export function LetterDesk({
 
   return (
     <AppLayout>
-      <CenterContent maxWidth={1280}>
+      {/* The desk has the whole window and the editor's own paper colour
+          behind it, which is what the editor's full-screen button used to
+          give (Austin, 2026-11-21: "the desk should feel more native and
+          immersive"). The nav, the way back and a failed save stay on the
+          page, which full screen covered. `minHeight` so the colour
+          reaches the bottom under a short letter. */}
+      <CenterContent maxWidth="none" style={{ background: semanticColors.surfaceCard, minHeight: "100%", paddingTop: 24, paddingBottom: 24 }}>
         <Stack gap={4} data-letter-desk={letter._id}>
           <Cluster gap={3} align="baseline">
             <a href={`/newspaper/${project._id}`} className={`${textSize.sm} ${sprinkles({ fontWeight: "semibold" })}`} style={{ color: "inherit" }} data-desk-project>
@@ -118,6 +124,7 @@ export function LetterDesk({
               send={send}
               writer={writer}
               editable
+              expandable={false}
               headerLeft={
                 <span className={`${textSize.lg} ${sprinkles({ fontWeight: "semibold" })}`} data-desk-title>
                   {letter.title}

@@ -54,7 +54,11 @@ export function LetterWriting({
   toolbarExtra,
   save,
   onSent,
+  expandable,
 }: {
+  /** False where the page already gives the editor the whole window (the
+   * desk). The Vault leaves it on. */
+  expandable?: boolean;
   file: LetterBeingWritten;
   /** Whose letter: a client's page has no brief block. The Vault, which
    * a client never reaches, says "guide". */
@@ -94,6 +98,7 @@ export function LetterWriting({
           that: a talk draft is kept as it is typed. */}
       <LetterSplitEditor
         key={loadedKey}
+        expandable={expandable}
         papers={brief && <LetterBrief key={`brief-${file._id}`} fileId={file._id} initial={brief} hasPurpose={!!file.purpose?.trim()} withBrief={writer !== "client"} openByDefault={isLetterOnlyItsHeading(file.content ?? "")} />}
         fileId={file._id}
         folderId={file.folder_id ?? null}
