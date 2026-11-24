@@ -81,7 +81,7 @@ ${PEOPLE.map((p) => `    ${`${p.role}:`.padEnd(20)} ${p.email}`).join("\n")}
        the letter you were reading. Send: nothing is added to your Card a second time.
    10. As a client, the Letters tab is there: your own drafts and the letters between you and the team, with
        no purpose lines. New letter asks a title and nothing else; the letter goes to the team. The same desk
-       page: talk it through, Write the outline, write, Add picture, Read it to them, Send. No brief block.
+       page: talk it through, Write the outline, write, Add photos, Read it to them, Send. No brief block.
        The other client and the guide never see your draft; once sent they read it with its pictures, and
        the guide's flag goes up. As a guide, the client's letter has no Edit on the desk.`);
   process.exit(0);

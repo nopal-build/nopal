@@ -140,6 +140,9 @@ function BriefReference({ markdown }: { markdown: string }) {
   );
 }
 
+/** A paper brought up from outside its pile: `n` counts the asks, 0 for none yet. */
+export type PaperRaise = { key: string; n: number };
+
 /** The three papers of a letter's workings. */
 export type LetterPaper = "brief" | "talk" | "outline";
 
@@ -162,7 +165,15 @@ export function LetterBrief({
   openByDefault,
   withBrief = true,
   startWith,
+  extraSheets,
+  raise,
 }: {
+  /** Papers that are not the letter's workings, after them in the pile
+   * (the editor's Photos sheet). */
+  extraSheets?: PaperSheet[];
+  /** A paper to bring up from outside the pile: `key` is raised each
+   * time `n` changes ("Add photos" in the editor's toolbar). */
+  raise?: PaperRaise | null;
   /** The paper that is up to begin with, when the caller knows better
    * than `paperUpAtStart`; null for none. */
   startWith?: LetterPaper | null;
@@ -180,7 +191,7 @@ export function LetterBrief({
 }) {
   const [state, setState] = useState<LetterBriefForPage>(initial);
   // Which paper is up. One at a time, over the Preview.
-  const [up, setUp] = useState<LetterPaper | null>(() => (startWith !== undefined ? startWith : paperUpAtStart(initial, openByDefault, withBrief)));
+  const [up, setUp] = useState<string | null>(() => (startWith !== undefined ? startWith : paperUpAtStart(initial, openByDefault, withBrief)));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -299,7 +310,12 @@ export function LetterBrief({
     </button>
   );
 
-  const onUp = useCallback((key: string | null) => setUp(key as LetterPaper | null), []);
+  const onUp = useCallback((key: string | null) => setUp(key), []);
+  const raisedKey = raise?.key;
+  const raisedN = raise?.n;
+  useEffect(() => {
+    if (raisedKey && raisedN) setUp(raisedKey);
+  }, [raisedKey, raisedN]);
 
   const messageLine = message && (
     <p className={textSize.sm} style={{ margin: 0, color: semanticColors.textDanger }} role="alert">
@@ -507,6 +523,7 @@ export function LetterBrief({
     // A talk half typed says so on its slip, since the slip may be all that shows.
     { key: "talk", label: state.talk.sent ? "Talked through" : "Talk it through", status: !state.talk.sent && talk.trim() ? "started" : undefined, content: talkPaper },
     ...(hasOutlinePaper ? [{ key: "outline", label: "The outline", status: outlineRunning ? "writing…" : outlineFailed ? "didn't get written" : undefined, content: outlinePaper }] : []),
+    ...(extraSheets ?? []),
   ];
 
   return (

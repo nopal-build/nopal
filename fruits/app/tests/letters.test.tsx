@@ -608,7 +608,7 @@ describe("the brief on the letter's page (2026-10-28)", () => {
     expect(vault).toMatch(/resolveLetterForWriter\(file\._id, user\)\);\s*if \(writes\) \{\s*letterBrief = /);
     // Drawn by the writing component, only when the loader handed one over.
     expect(vault).toContain("brief={letterBrief}");
-    expect(readFileSync(path.join(here, "../components/LetterWriting.tsx"), "utf8")).toContain("{brief && <LetterBrief ");
+    expect(readFileSync(path.join(here, "../components/LetterWriting.tsx"), "utf8")).toMatch(/brief \? \(\s*<LetterBrief\s/);
     expect(readFileSync(path.join(here, "../routes/public.letter.$fileId.tsx"), "utf8")).not.toMatch(/brief/i);
     expect(readFileSync(path.join(here, "../../../packages/robustness-core/src/data/letters.server.ts"), "utf8")).not.toMatch(/letter_briefs|brief\.server/);
   });

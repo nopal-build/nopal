@@ -70,6 +70,9 @@ function useIsMobileWebsiteEditor(): boolean {
   return isMobile;
 }
 
+/** What a paper that picks pictures is handed (`previewPapers`). */
+export type PicturePapers = { insert: (markdown: string[]) => void; upload: () => void; asked: number; body: string };
+
 export function MarkdownSplitEditor({
   fileId,
   initialContent,
@@ -82,7 +85,6 @@ export function MarkdownSplitEditor({
   showScratchPadLink = false,
   onBodyChange,
   onInsertFiles,
-  renderPicturePicker,
   spellCheck = false,
   autosave = false,
   showLength = false,
@@ -103,8 +105,15 @@ export function MarkdownSplitEditor({
    * brief, talk-through and outline. Rendered first in the Preview
    * column with no wrapper, so it sticks for the whole length of the
    * page; on a phone it stays above whichever pane is showing; put away
-   * while reading. */
-  previewPapers?: ReactNode;
+   * while reading.
+   *
+   * A function when one of the papers is where pictures are picked (the
+   * letter's Photos sheet): it is handed what a picker needs, and "Add
+   * photos" then raises that paper instead of opening the file picker.
+   * `insert` puts markdown at the cursor, `upload` opens the file
+   * picker, `asked` counts the presses of "Add photos" (0 until the
+   * first), and `body` is the text as it stands. */
+  previewPapers?: ReactNode | ((pictures: PicturePapers) => ReactNode);
   fileId: string;
   initialContent: string;
   editable: boolean;
@@ -133,11 +142,6 @@ export function MarkdownSplitEditor({
    * page and returns a standard image). Omitted by editors whose pages
    * take no pictures this way (a website page, a sync-api run). */
   onInsertFiles?: (files: File[]) => Promise<string[]>;
-  /** A panel for choosing pictures already on the project, opened by
-   * "Add picture" and rendered above the Markdown pane; `insert` puts
-   * markdown at the cursor, `upload` opens the file picker, `close` shuts
-   * the panel. Without it, "Add picture" opens the file picker directly. */
-  renderPicturePicker?: (ctx: { insert: (markdown: string[]) => void; upload: () => void; close: () => void }) => ReactNode;
   /** Rendered FIRST in the merged toolbar row -- the vault's own
    * breadcrumb (+ mobile folder-tree-drawer toggle + "Published"
    * public-link badge), built once by `VaultV2Page` and reused here
@@ -193,19 +197,36 @@ export function MarkdownSplitEditor({
   // (`insertAtSelection`). One status line while that runs; a failure says
   // so and inserts nothing.
   const [insertStatus, setInsertStatus] = useState<string | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // Presses of "Add photos", for papers that pick pictures (`previewPapers`).
+  const [picturesAsked, setPicturesAsked] = useState(0);
+  const papersPickPictures = typeof previewPapers === "function";
   const pictureInputRef = useRef<HTMLInputElement | null>(null);
+  const cursorAfterInsert = useRef<number | null>(null);
   // Where the cursor is when the text arrives: the textarea's own
-  // selection, read at that moment (the picker panel may hold focus).
+  // selection, read at that moment (the Photos paper may hold focus).
   const insertTexts = useCallback(
     (texts: string[]) => {
       const el = textareaRef.current;
       const start = el?.selectionStart ?? body.length;
       const end = el?.selectionEnd ?? start;
-      setBody((prev) => insertAtSelection(prev, start, end, texts.join("\n\n")).body);
+      setBody((prev) => {
+        const placed = insertAtSelection(prev, start, end, texts.join("\n\n"));
+        cursorAfterInsert.current = placed.cursor;
+        return placed.body;
+      });
     },
     [body.length],
   );
+  // The cursor goes after what was put in. Without this the browser
+  // leaves it at the end of the text once the value changes under an
+  // unfocused textarea, and the next photo picked from a paper that
+  // stays up would land at the bottom of the letter.
+  useEffect(() => {
+    const at = cursorAfterInsert.current;
+    if (at == null) return;
+    cursorAfterInsert.current = null;
+    textareaRef.current?.setSelectionRange(at, at);
+  }, [body]);
   const insertFiles = useCallback(
     async (candidates: File[]) => {
       if (!onInsertFiles || !editable) return;
@@ -216,7 +237,6 @@ export function MarkdownSplitEditor({
         const texts = await onInsertFiles(files);
         insertTexts(texts);
         setInsertStatus(null);
-        setPickerOpen(false);
       } catch (err) {
         setInsertStatus(err instanceof Error && err.message ? err.message : "The picture didn't upload. Try again.");
       }
@@ -224,9 +244,10 @@ export function MarkdownSplitEditor({
     [onInsertFiles, editable, insertTexts],
   );
   const openAddPicture = useCallback(() => {
-    if (renderPicturePicker) setPickerOpen((open) => !open);
+    if (papersPickPictures) setPicturesAsked((n) => n + 1);
     else pictureInputRef.current?.click();
-  }, [renderPicturePicker]);
+  }, [papersPickPictures]);
+  const openFilePicker = useCallback(() => pictureInputRef.current?.click(), []);
 
   useEffect(() => {
     onBodyChange?.(body);
@@ -464,15 +485,6 @@ export function MarkdownSplitEditor({
             <span>Markdown</span>
             <span className="vault-website-editor-mobile-expand">{expandButton}</span>
           </div>
-          {pickerOpen &&
-            renderPicturePicker?.({
-              insert: (texts) => {
-                insertTexts(texts);
-                setPickerOpen(false);
-              },
-              upload: () => pictureInputRef.current?.click(),
-              close: () => setPickerOpen(false),
-            })}
           <textarea
             ref={textareaRef}
             className="vault-website-editor-textarea"
@@ -535,8 +547,8 @@ export function MarkdownSplitEditor({
                     void insertFiles(files);
                   }}
                 />
-                <button type="button" className="vault-toolbar-btn" onClick={openAddPicture} disabled={insertStatus?.startsWith("Adding") ?? false} aria-expanded={pickerOpen}>
-                  Add picture
+                <button type="button" className="vault-toolbar-btn" onClick={openAddPicture} disabled={insertStatus?.startsWith("Adding") ?? false}>
+                  Add photos
                 </button>
                 {insertStatus && (
                   <span className="text-xs font-mono" style={{ color: insertStatus.startsWith("Adding") ? "var(--color-text-subtle)" : "var(--color-text-danger)" }}>
@@ -552,7 +564,7 @@ export function MarkdownSplitEditor({
           className="vault-website-editor-preview"
           style={reading ? { display: "flex", flexDirection: "column" } : papersOverMarkdown ? { display: "block", alignSelf: "stretch" } : undefined}
         >
-          {!reading && previewPapers}
+          {!reading && (typeof previewPapers === "function" ? previewPapers({ insert: insertTexts, upload: openFilePicker, asked: picturesAsked, body }) : previewPapers)}
           <Surface
             className="vault-website-editor-preview-surface"
             style={reading ? { flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" } : papersOverMarkdown ? { display: "none" } : undefined}
@@ -624,8 +636,8 @@ export function MarkdownSplitEditor({
           </span>
         )}
         {onInsertFiles && editable && (
-          <button type="button" className="vault-toolbar-btn" onClick={openAddPicture} disabled={insertStatus?.startsWith("Adding") ?? false} aria-expanded={pickerOpen}>
-            Add picture
+          <button type="button" className="vault-toolbar-btn" onClick={openAddPicture} disabled={insertStatus?.startsWith("Adding") ?? false}>
+            Add photos
           </button>
         )}
         {!autosave && (
