@@ -666,8 +666,13 @@ function renderNode(node: any, key: number, ctx: RenderCtx): ReactNode {
       );
     }
 
+    // A plain picture loads its browser-sized copy, as a gallery's photos
+    // do, never the original: a phone's HEIC original is one Chrome can't
+    // draw at all, and the page showed the alt text in its place ("IMG_2051";
+    // Austin, 2026-11-24). The rendition routes hand back the original
+    // while there is no copy yet, and any other URL is left as it is.
     case "image":
-      return <img key={key} src={node.url} alt={node.alt ?? ""} title={node.title ?? undefined} />;
+      return <img key={key} src={renditionUrl(node.url, "display")} alt={node.alt ?? ""} title={node.title ?? undefined} />;
 
     case "linkReference": {
       const def = ctx.definitions.get(node.identifier);
@@ -682,7 +687,7 @@ function renderNode(node: any, key: number, ctx: RenderCtx): ReactNode {
     case "imageReference": {
       const def = ctx.definitions.get(node.identifier);
       if (!def) return null;
-      return <img key={key} src={def.url} alt={node.alt ?? ""} title={def.title ?? undefined} />;
+      return <img key={key} src={renditionUrl(def.url, "display")} alt={node.alt ?? ""} title={def.title ?? undefined} />;
     }
 
     case "blockquote":
