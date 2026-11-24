@@ -20,10 +20,11 @@
 // "Edited since sent" is read once per load and a letter's autosave does
 // not reload the page, so a save that lands moves the send control on
 // here (`sendStateAfterSaves`); a send clears it.
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { LetterBriefForPage } from "robustness-core/data/brief.server";
 import { CopyLinkButton } from "./CopyLinkButton";
-import { LetterBrief, isLetterOnlyItsHeading } from "./LetterBrief";
+import { LetterBrief, isLetterOnlyItsHeading, type PaperRaise } from "./LetterBrief";
+import { PaperPile, type PaperSheet } from "./stamps-candidates/PaperPile";
 import { LetterSendControl, sendStateAfterSaves, type LetterSendState } from "./LetterSendControl";
 import { LetterSplitEditor } from "./LetterSplitEditor";
 import { letterPublicPath } from "./letterPaths";
@@ -63,7 +64,7 @@ export function LetterWriting({
   /** Whose letter: a client's page has no brief block. The Vault, which
    * a client never reaches, says "guide". */
   writer: "guide" | "client";
-  /** Where "Add picture" looks first. */
+  /** Where "Add photos" looks first. */
   projectFolderId: string | null;
   /** The letter's workings, for whoever may write the letter; null hides them. */
   brief: LetterBriefForPage | null;
@@ -99,7 +100,23 @@ export function LetterWriting({
       <LetterSplitEditor
         key={loadedKey}
         expandable={expandable}
-        papers={brief && <LetterBrief key={`brief-${file._id}`} fileId={file._id} initial={brief} hasPurpose={!!file.purpose?.trim()} withBrief={writer !== "client"} openByDefault={isLetterOnlyItsHeading(file.content ?? "")} />}
+        // No pile at all on a letter with no workings and no way to edit.
+        papers={!brief && !editable ? undefined : ({ sheets, raise }) =>
+          brief ? (
+            <LetterBrief
+              key={`brief-${file._id}`}
+              fileId={file._id}
+              initial={brief}
+              hasPurpose={!!file.purpose?.trim()}
+              withBrief={writer !== "client"}
+              openByDefault={isLetterOnlyItsHeading(file.content ?? "")}
+              extraSheets={sheets}
+              raise={raise}
+            />
+          ) : (
+            <PhotosPile sheets={sheets} raise={raise} />
+          )
+        }
         fileId={file._id}
         folderId={file.folder_id ?? null}
         projectFolderId={projectFolderId}
@@ -128,4 +145,18 @@ export function LetterWriting({
       />
     </>
   );
+}
+
+/** The pile on a letter with no workings to show: the editor's Photos
+ * sheet alone over the Preview, and nothing at all when there is no
+ * sheet either (a letter that can't be edited). */
+function PhotosPile({ sheets, raise }: { sheets: PaperSheet[]; raise: PaperRaise | null }) {
+  const [up, setUp] = useState<string | null>(null);
+  const raisedKey = raise?.key;
+  const raisedN = raise?.n;
+  useEffect(() => {
+    if (raisedKey && raisedN) setUp(raisedKey);
+  }, [raisedKey, raisedN]);
+  if (sheets.length === 0) return null;
+  return <PaperPile under="Preview" sheets={sheets} up={up} onUp={setUp} aria-label="Photos" data-letter-photos-pile />;
 }

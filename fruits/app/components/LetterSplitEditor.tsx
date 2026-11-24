@@ -14,6 +14,11 @@ import { LetterRecorder } from "./LetterRecorder";
 import { setLeadingRecording } from "./letterRecording";
 import { MarkdownSplitEditor } from "./MarkdownSplitEditor";
 import { ProjectPhotoPicker, type ProjectPhoto } from "./ProjectPhotoPicker";
+import type { PaperRaise } from "./LetterBrief";
+import type { PaperSheet } from "./stamps-candidates/PaperPile";
+
+/** The Photos sheet's key in the pile. */
+export const PHOTOS_PAPER = "photos";
 
 // ─── Letter editor ──────────────────────────────────────────────────
 // A letter is a website page that lives in a project (Austin,
@@ -42,12 +47,15 @@ export function LetterSplitEditor({
 }: {
   /** See `MarkdownSplitEditor`'s `expandable`. */
   expandable?: boolean;
-  /** The letter's workings (`LetterBrief`), kept at the top of the
-   * Preview side while writing. */
-  papers?: ReactNode;
+  /** The papers kept at the top of the Preview side while writing: the
+   * letter's workings (`LetterBrief`) where there are any, and the
+   * Photos sheet this editor makes. Handed that sheet (none on a letter
+   * that can't be edited) and the ask to bring it up, to put in the
+   * pile. */
+  papers?: (photos: { sheets: PaperSheet[]; raise: PaperRaise | null }) => ReactNode;
   fileId: string;
   folderId: string | null;
-  /** The project the letter belongs to: where "Add picture" looks
+  /** The project the letter belongs to: where "Add photos" looks
    * first (`/api/projects/:id/photos`, the Photos tab's own rows). */
   projectFolderId: string | null;
   initialContent: string;
@@ -63,7 +71,7 @@ export function LetterSplitEditor({
    * on their own included, on a letter they can edit (`LetterRecorder`). */
   recordable?: boolean;
 }) {
-  // The project's photos, fetched the first time the picker opens.
+  // The project's photos, fetched the first time the Photos sheet is up.
   const [photos, setPhotos] = useState<ProjectPhoto[] | null>(null);
   const [photosError, setPhotosError] = useState<string | null>(null);
   const loadPhotos = useCallback(async () => {
@@ -131,15 +139,21 @@ export function LetterSplitEditor({
       onSave={onSave}
       headerLeft={headerWithPurpose}
       toolbarRight={toolbarRight}
-      previewPapers={papers}
+      previewPapers={
+        papers &&
+        (({ insert, upload, asked, body }) =>
+          papers({
+            sheets: editable
+              ? [{ key: PHOTOS_PAPER, label: "Photos", content: <PhotoPickerLoader photos={photos} error={photosError} load={loadPhotos} insert={insert} upload={upload} body={body} /> }]
+              : [],
+            raise: asked ? { key: PHOTOS_PAPER, n: asked } : null,
+          }))
+      }
       expandable={expandable}
       onInsertFiles={insertPictures}
       spellCheck
       autosave
       showLength
-      renderPicturePicker={({ insert, upload, close }) => (
-        <PhotoPickerLoader photos={photos} error={photosError} load={loadPhotos} insert={insert} upload={upload} close={close} />
-      )}
       toolbarTools={
         recordable && editable && folderId
           ? ({ body, updateBody, previewElement, setReading }) => (
@@ -176,25 +190,26 @@ export function LetterSplitEditor({
   );
 }
 
-/** Fetches the project's photos when the picker panel mounts, then hands
- * them to `ProjectPhotoPicker`. */
+/** Fetches the project's photos when the Photos sheet is first up (a
+ * sheet is drawn only while it is up), then hands them to
+ * `ProjectPhotoPicker`. A pick stays on the sheet. */
 function PhotoPickerLoader({
   photos,
   error,
   load,
   insert,
   upload,
-  close,
+  body,
 }: {
   photos: ProjectPhoto[] | null;
   error: string | null;
   load: () => Promise<void>;
   insert: (markdown: string[]) => void;
   upload: () => void;
-  close: () => void;
+  body: string;
 }) {
   useEffect(() => {
     if (photos === null && !error) void load();
   }, [photos, error, load]);
-  return <ProjectPhotoPicker photos={photos ?? []} loading={photos === null && !error} error={error} onPick={(md) => insert([md])} onUpload={upload} onClose={close} />;
+  return <ProjectPhotoPicker photos={photos ?? []} loading={photos === null && !error} error={error} body={body} onPick={(md) => insert([md])} onUpload={upload} />;
 }
